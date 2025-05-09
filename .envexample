@@ -1,0 +1,2 @@
+TOKEN=ВАШ*ТОКЕН*ОТ_TELEGRAM
+DB_URL=sqlite://db.sqlite3
