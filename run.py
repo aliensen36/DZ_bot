@@ -1,31 +1,31 @@
 import asyncio
 import logging
+import sys
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
-from aiogram.enums import ParseMode
-from tortoise import Tortoise
 
-from app.user import user
-from config import TOKEN, DB_URL
-
+from database.engine import init_db, close_db
+from handlers.user import user
+from config import TOKEN, PROPERTIES
 
 logger = logging.getLogger(__name__)
-bot = Bot(token=TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+bot = Bot(token=TOKEN,
+          default=PROPERTIES)
 
 
 async def startup(dispatcher: Dispatcher):
-    await Tortoise.init(
-        #db_url=f"postgres://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
-        db_url=DB_URL,
-        modules={"models": ["app.database.models"]},
-    )
-    await Tortoise.generate_schemas()
+    logger.info("Starting bot...")
+    try:
+        await init_db()
+    except Exception as e:
+        logger.error(f"Database error: {e}")
+        raise
 
 
 async def shutdown(dispatcher: Dispatcher):
-    await Tortoise.close_connections()
-    exit(0)
+    logger.info("Shutting down...")
+    await close_db()
+    sys.exit(0)
 
 
 async def main():
@@ -34,7 +34,12 @@ async def main():
     dp.startup.register(startup)
     dp.shutdown.register(shutdown)
 
-    await dp.start_polling(bot)
+    try:
+        await dp.start_polling(bot)
+    except Exception as e:
+        logger.critical(f"Bot crashed: {e}")
+    finally:
+        logger.info("Bot stopped")
 
 
 if __name__ == "__main__":
@@ -42,4 +47,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        logger.info("Bot stopped by user")

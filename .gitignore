@@ -385,3 +385,5 @@ test.py
 TEST.py
 
 # End of https://www.toptal.com/developers/gitignore/api/windows,linux,pycharm,python,vim,visualstudiocode,git
+/db.sqlite3-shm
+/db.sqlite3-wal

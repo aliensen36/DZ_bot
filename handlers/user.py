@@ -1,12 +1,12 @@
 import logging
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
-from aiogram.filters import CommandStart, Command
+from aiogram import Router
+from aiogram.types import Message
+from aiogram.filters import CommandStart
 
-from app.database.requests import create_user
+from database.requests import create_user
 
-import app.keyboards as kb
+import keyboards.keyboards as kb
 
 
 logger = logging.getLogger(__name__)

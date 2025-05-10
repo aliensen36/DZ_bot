@@ -1,7 +1,6 @@
 import logging
 
-from tortoise.exceptions import DoesNotExist
-from app.database.models import User
+from database.models import User
 
 
 logger = logging.getLogger(__name__)

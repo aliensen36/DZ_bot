@@ -1,9 +1,15 @@
 import os
+
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from dotenv import load_dotenv
 
 load_dotenv()
 
 TOKEN = os.getenv("TOKEN")
+
+PROPERTIES = DefaultBotProperties(parse_mode=ParseMode.HTML)
+
 
 DB_URL = os.getenv("DB_URL")
 #DB_HOST = os.getenv("DB_HOST")
@@ -19,7 +25,7 @@ TORTOISE_ORM = {
     },
     "apps": {
         "models": {
-            "models": ["app.database.models", "aerich.models"],
+            "models": ["database.models", "aerich.models"],
             "default_connection": "default",
         },
     },
