@@ -16,4 +16,6 @@ start_router = Router()
 @start_router.message(CommandStart())
 async def cmd_start(message: Message):
     user = await UserRequests.get_or_create_from_telegram(message.from_user)
-    await message.answer(f"Привет, {user.first_name}!")
+    await message.answer(f"✨ Привет, <b>{user.first_name}</b>! ✨\n\n"
+                         f"Рады тебя видеть в нашем боте! 🤖💫")
+
