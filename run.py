@@ -5,7 +5,7 @@ import sys
 from aiogram import Bot, Dispatcher
 
 from database.engine import init_db, close_db
-from handlers.user import user
+from handlers.start import start_router
 from config import TOKEN, PROPERTIES
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ async def shutdown(dispatcher: Dispatcher):
 
 async def main():
     dp = Dispatcher()
-    dp.include_router(user)
+    dp.include_router(start_router)
     dp.startup.register(startup)
     dp.shutdown.register(shutdown)
 
