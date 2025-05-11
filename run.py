@@ -2,8 +2,9 @@ import asyncio
 import logging
 import sys
 
-from aiogram import Bot, Dispatcher
+from aiogram import Bot, Dispatcher, types
 
+from cmds.bot_cmds_list import bot_cmds_list
 from database.engine import init_db, close_db
 from handlers.start import start_router
 from config import TOKEN, PROPERTIES
@@ -30,6 +31,8 @@ async def shutdown(dispatcher: Dispatcher):
 
 async def main():
     dp = Dispatcher()
+    await bot.set_my_commands(commands=bot_cmds_list,
+                              scope=types.BotCommandScopeAllPrivateChats())
     dp.include_router(start_router)
     dp.startup.register(startup)
     dp.shutdown.register(shutdown)
