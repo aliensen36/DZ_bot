@@ -10,7 +10,7 @@ from aiogram.types import Message
 from config import ADMIN_CHAT_ID
 
 # Файл для хранения ID последнего сообщения
-MESSAGE_ID_FILE = Path("last_message_id.json")
+MESSAGE_ID_FILE = Path("utils/last_message_id.json")
 
 def load_last_message_id() -> int | None:
     """Загружает ID последнего сообщения из файла"""
@@ -63,7 +63,7 @@ async def notify_restart(bot: Bot, action: str = "перезапущен"):
 
         # Формируем сообщение
         text = (
-            f"⚠️ Бот был <b>{action}</b>!\n\n"
+            f"⚠️ Бот <b>{action}</b>!\n\n"
             f"• Время: {time}\n"
             f"• Сервер: {hostname} ({system})\n"
         )

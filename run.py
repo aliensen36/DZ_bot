@@ -19,7 +19,7 @@ bot = Bot(token=TOKEN,
 
 async def startup(dispatcher: Dispatcher):
     logger.info("Starting bot...")
-    await notify_restart(bot, "перезапущен")
+    await notify_restart(bot, "работает")
     try:
         await init_db()
     except Exception as e:
