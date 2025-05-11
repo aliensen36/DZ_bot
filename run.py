@@ -1,15 +1,19 @@
 import asyncio
 import logging
 import sys
+from importlib import import_module
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, types
 
+from admin.handlers.admin_handler import admin_router
 from cmds.bot_cmds_list import bot_cmds_list
 from database.engine import init_db, close_db
-from handlers.start import start_router
+from handlers.start_handler import start_router
 from config import TOKEN, PROPERTIES
 
 logger = logging.getLogger(__name__)
+
 bot = Bot(token=TOKEN,
           default=PROPERTIES)
 
@@ -29,11 +33,21 @@ async def shutdown(dispatcher: Dispatcher):
     sys.exit(0)
 
 
+def setup_routers(dp: Dispatcher) -> None:
+    """Регистрация всех роутеров"""
+    routers = (
+        start_router,
+        admin_router,
+    )
+
+    for router in routers:
+        dp.include_router(router)
+
 async def main():
     dp = Dispatcher()
     await bot.set_my_commands(commands=bot_cmds_list,
                               scope=types.BotCommandScopeAllPrivateChats())
-    dp.include_router(start_router)
+    setup_routers(dp) # Загрузка роутеров
     dp.startup.register(startup)
     dp.shutdown.register(shutdown)
 
