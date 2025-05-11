@@ -387,3 +387,4 @@ TEST.py
 # End of https://www.toptal.com/developers/gitignore/api/windows,linux,pycharm,python,vim,visualstudiocode,git
 /db.sqlite3-shm
 /db.sqlite3-wal
+/last_message_id.json
