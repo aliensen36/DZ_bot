@@ -9,6 +9,7 @@ from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
 from cmds.bot_cmds_list import bot_cmds_list
 from database.engine import init_db, close_db
+from handlers.profile_handler import profile_router
 from handlers.start_handler import start_router
 from config import TOKEN, PROPERTIES, ADMIN_CHAT_ID
 from utils.services import notify_restart
@@ -39,6 +40,7 @@ def setup_routers(dp: Dispatcher) -> None:
     """Регистрация всех роутеров"""
     routers = (
         start_router,
+        profile_router,
         admin_router,
         admin_mailing_router,
     )
