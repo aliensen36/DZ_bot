@@ -37,11 +37,6 @@ python -m pip freeze > requirements.txt # Обновление списка за
 python run.py
 ```
 
-### Миграции
-```bash
-редактировать
-```
-
 ### 🛠️ Технологии
 
 - **Backend**: Python, Aiogram 3, Tortoise ORM

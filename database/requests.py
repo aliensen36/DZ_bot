@@ -5,7 +5,7 @@ from typing import Optional
 import aiogram
 from tortoise.exceptions import IntegrityError
 
-from database.models import User
+from database.models import User, Mailing
 
 logger = logging.getLogger(__name__)
 
@@ -68,3 +68,19 @@ class UserRequests:
     async def get_by_tg_id(tg_id: int) -> Optional[User]:
         """Получает пользователя по telegram ID"""
         return await User.get_or_none(tg_id=tg_id)
+    
+    @staticmethod
+    async def get_all_users() -> list[User]:
+        """Получает всех пользователей"""
+        return await User.all()
+
+class MailingRequests:
+    @staticmethod
+    async def create_mailing(from_user: User, text: str, image: Optional[str] = None, button_url: Optional[str] = None, type: Optional[str] = "other") -> Mailing:
+        """Создает рассылку"""
+        return await Mailing.create(
+            from_user=from_user,
+            text=text,
+            image=image,
+            button_url=button_url
+        )
