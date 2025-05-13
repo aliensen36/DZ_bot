@@ -3,7 +3,7 @@ import logging
 
 from aiogram import Router, types, F
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, InlineKeyboardButton, BufferedInputFile, ContentType
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from pandas import NaT, isna
 
@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 admin_router = Router()
 admin_router.message.filter(
     ChatTypeFilter("private"),
+    F.content_type == ContentType.TEXT,
+    ~F.text.startswith("/scanqr"), # исключаем /scanqr
     IsGroupAdmin(ADMIN_CHAT_ID, show_message=True)
+
 )
 
 

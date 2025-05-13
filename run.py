@@ -13,6 +13,8 @@ from handlers.profile_handler import profile_router
 from handlers.start_handler import start_router
 from config import TOKEN, PROPERTIES
 from utils.services import notify_restart
+from handlers.qr_handler import router as qr_router
+from aiogram.fsm.storage.memory import MemoryStorage
 
 logger = logging.getLogger(__name__)
 
@@ -43,13 +45,15 @@ def setup_routers(dp: Dispatcher) -> None:
         profile_router,
         admin_router,
         admin_mailing_router,
+        qr_router
     )
     for router in routers:
         dp.include_router(router)
 
 
 async def main():
-    dp = Dispatcher()
+    storage = MemoryStorage()
+    dp = Dispatcher(storage=storage)
     await bot.set_my_commands(commands=bot_cmds_list,
                               scope=types.BotCommandScopeAllPrivateChats())
     setup_routers(dp) # Загрузка роутеров
@@ -70,3 +74,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+
+
