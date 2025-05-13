@@ -37,4 +37,3 @@ class Mailing(Model):
     
     def __str__(self):
         return f"{self.from_user} ({self.created_at})"
-        
