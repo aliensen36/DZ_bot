@@ -11,7 +11,7 @@ from cmds.bot_cmds_list import bot_cmds_list
 from database.engine import init_db, close_db
 from handlers.profile_handler import profile_router
 from handlers.start_handler import start_router
-from config import TOKEN, PROPERTIES, ADMIN_CHAT_ID
+from config import TOKEN, PROPERTIES
 from utils.services import notify_restart
 
 logger = logging.getLogger(__name__)

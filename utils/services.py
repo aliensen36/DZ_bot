@@ -7,7 +7,7 @@ from pathlib import Path
 from aiogram import Bot
 from aiogram.types import Message
 
-from config import ADMIN_CHAT_ID
+from utils.filters import ADMIN_CHAT_ID
 
 # Файл для хранения ID последнего сообщения
 MESSAGE_ID_FILE = Path("utils/last_message_id.json")

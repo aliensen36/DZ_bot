@@ -1,6 +1,13 @@
+import os
 from aiogram.filters import BaseFilter
 from aiogram.types import Message
 from typing import Union
+from aiogram import Bot
+from dotenv import load_dotenv
+
+load_dotenv()
+
+ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
 class ChatTypeFilter(BaseFilter):
     def __init__(self, chat_types: Union[str, list[str]]):
@@ -11,21 +18,21 @@ class ChatTypeFilter(BaseFilter):
 
 
 class IsGroupAdmin(BaseFilter):
-    def __init__(self, admin_chat_id: int):
+    def __init__(self, admin_chat_id: int, show_message: bool = True):
         self.admin_chat_id = admin_chat_id
+        self.show_message = show_message  # Флаг для отображения сообщения
 
     async def __call__(self, message: Message, bot: Bot) -> bool:
-        # Для личных сообщений проверяем права в группе
         if message.chat.type == "private":
             try:
                 member = await bot.get_chat_member(self.admin_chat_id, message.from_user.id)
-                return member.status in ["creator", "administrator"]
-            except:
+                if member.status not in ["creator", "administrator"]:
+                    if self.show_message:  # Показываем сообщение только если флаг True
+                        await message.answer("🚫 Доступ только для админов!")
+                    return False
+                return True
+            except Exception as e:
+                if self.show_message:
+                    await message.answer("⚠️ Ошибка проверки прав доступа")
                 return False
-        # Для групповых сообщений проверяем права в текущем чате
-        else:
-            try:
-                member = await bot.get_chat_member(message.chat.id, message.from_user.id)
-                return member.status in ["creator", "administrator"]
-            except:
-                return False
+        return False

@@ -7,17 +7,21 @@ from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, InlineKey
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from pandas import NaT, isna
 
-from admin.keyboards.admin_keyboards import admin_keyboard
-from config import admin_chat_required
+from admin.keyboards.admin_reply import admin_keyboard
 from database.models import User
 import pandas as pd
 from io import BytesIO
 from datetime import datetime as dt
-
+from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
 
 admin_router = Router()
+admin_router.message.filter(
+    ChatTypeFilter("private"),
+    IsGroupAdmin(ADMIN_CHAT_ID, show_message=True)
+)
+
 
 
 async def generate_excel_report():
@@ -92,7 +96,6 @@ async def generate_excel_report():
 
 
 @admin_router.message(Command("admin"))
-@admin_chat_required
 async def admin_panel(message: Message):
     logger.info(f"Admin access by {message.from_user.id}")
     await message.answer(
