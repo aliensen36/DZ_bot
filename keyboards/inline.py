@@ -10,9 +10,7 @@ async def get_profile_inline_kb() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="🔔 Мои подписки",
                              callback_data="my_subscriptions"),
         InlineKeyboardButton(text="🎁 Мои бонусы",
-                             callback_data="my_bonuses"),
-        InlineKeyboardButton(text="🔍 Сканировать QR-код", 
-                             callback_data="scanqr"),
+                             callback_data="my_bonuses")
         ]
     builder.add(*buttons)
     builder.adjust(1)
