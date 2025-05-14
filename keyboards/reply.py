@@ -1,12 +1,15 @@
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [
-            KeyboardButton(text="Личный кабинет")
+        [KeyboardButton(text="👤 Личный кабинет")],
+        [KeyboardButton(
+            text="📲 Открыть приложение",
+            web_app=WebAppInfo(url="https://miel.sayrrx.cfd/")
+        )
         ]
     ],
     resize_keyboard=True,
-    one_time_keyboard=False,
+    persistent=True,
     input_field_placeholder="Выберите действие"
 )

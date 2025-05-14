@@ -12,7 +12,7 @@ profile_router = Router()
 
 
 # Хендлер для кнопки "Личный кабинет"
-@profile_router.message(F.text == "Личный кабинет")
+@profile_router.message(F.text == "👤 Личный кабинет")
 async def handle_profile(message: Message):
     try:
         await message.answer(
