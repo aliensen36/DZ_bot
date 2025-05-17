@@ -3,15 +3,10 @@ from aiogram import Bot, types
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Message
-from dotenv import load_dotenv
 
-load_dotenv()
 
-TOKEN = os.getenv("TOKEN")
 
-PROPERTIES = DefaultBotProperties(parse_mode=ParseMode.HTML)
-
-DB_URL = os.getenv("DB_URL")
+# DB_URL = os.getenv("DB_URL")
 #DB_HOST = os.getenv("DB_HOST")
 #DB_PORT = os.getenv("DB_PORT")
 #DB_USER = os.getenv("DB_USER")
@@ -19,17 +14,17 @@ DB_URL = os.getenv("DB_URL")
 #DB_NAME = os.getenv("DB_NAME")
 
  # sqlite
-TORTOISE_ORM = {
-    "connections": {
-        "default": DB_URL,
-    },
-    "apps": {
-        "models": {
-            "models": ["database.models", "aerich.models"],
-            "default_connection": "default",
-        },
-    },
-}
+# TORTOISE_ORM = {
+#     "connections": {
+#         "default": DB_URL,
+#     },
+#     "apps": {
+#         "models": {
+#             "models": ["database.models", "aerich.models"],
+#             "default_connection": "default",
+#         },
+#     },
+# }
 
 # postgres
 #TORTOISE_ORM = {

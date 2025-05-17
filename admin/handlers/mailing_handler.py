@@ -9,8 +9,8 @@ from aiogram.fsm.context import FSMContext
 from admin.States.mailing_fsm import MailingFSM
 from admin.keyboards.admin_inline import mailing_keyboard, admin_link_keyboard, accept_mailing_kb
 from admin.keyboards.admin_reply import admin_keyboard
-from database.models import Mailing
-from database.requests import MailingRequests, UserRequests
+# from database.models import Mailing
+# from database.requests import MailingRequests, UserRequests
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
