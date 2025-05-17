@@ -10,7 +10,7 @@ from data.config import config_settings
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
-# from admin.handlers.admin_handler import admin_router
+from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
 from cmds.bot_cmds_list import bot_cmds_list
 from handlers.profile_handler import profile_router
@@ -50,7 +50,7 @@ def setup_routers(dp: Dispatcher) -> None:
     routers = (
         start_router,
         profile_router,
-        # admin_router,
+        admin_router,
         admin_mailing_router,
     )
     for router in routers:

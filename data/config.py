@@ -3,7 +3,6 @@ from pydantic import SecretStr
 from dotenv import load_dotenv
 load_dotenv()
 
-
 class Settings(BaseSettings):
     TOKEN: SecretStr
     ADMIN_CHAT_ID: int

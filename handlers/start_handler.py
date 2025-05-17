@@ -3,7 +3,7 @@ import aiohttp
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
-
+from data.url import url_users
 from keyboards.reply import main_kb
 
 logger = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ async def cmd_start(message: Message):
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post("http://localhost:8000/api/users/", json=user_data) as resp:
+        async with session.post(url_users, json=user_data) as resp:
             data = await resp.json()
 
     await message.answer(f"✨ Привет, <b>{data['first_name']}</b>! ✨\n\n"
