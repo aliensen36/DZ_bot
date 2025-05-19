@@ -46,8 +46,9 @@ async def generate_excel_report():
     if not users:
         return None
 
-    # Создаем DataFrame с нужными полями
-    df = pd.DataFrame(users)
+    # Создаем DataFrame и исключаем ненужные столбцы
+    columns_to_drop = ['id', 'password']  # Список столбцов для удаления
+    df = pd.DataFrame(users).drop(columns=columns_to_drop, errors='ignore')
 
     # Применяем преобразования к полям
     bool_columns = ['is_bot', 'is_staff', 'is_active', 'is_superuser']
@@ -121,6 +122,7 @@ async def generate_excel_report():
     output.seek(0)
     return output
 
+
 @admin_router.message(Command("admin"))
 async def admin_panel(message: Message, bot: Bot):
     user_id = message.from_user.id
@@ -128,6 +130,7 @@ async def admin_panel(message: Message, bot: Bot):
         "🛠 Админ-панель",
         reply_markup=admin_keyboard()
     )
+
 
 @admin_router.message(F.text == "📊 Статистика")
 async def show_statistics(message: Message):
