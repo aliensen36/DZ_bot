@@ -5,7 +5,7 @@ main_kb = ReplyKeyboardMarkup(
         [KeyboardButton(text="👤 Личный кабинет")],
         [KeyboardButton(
             text="📲 Открыть приложение",
-            web_app=WebAppInfo(url="https://miel.sayrrx.cfd/")
+            web_app=WebAppInfo(url="https://design-zavod.tech/")
         )
         ]
     ],
