@@ -1,17 +1,14 @@
-from email.mime import image
 import logging
 import os
-
+import aiohttp
 from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from aiogram.fsm.context import FSMContext
-
-from admin.States.mailing_fsm import MailingFSM
 from admin.keyboards.admin_inline import mailing_keyboard, admin_link_keyboard, accept_mailing_kb
 from admin.keyboards.admin_reply import admin_keyboard
-# from database.models import Mailing
-# from database.requests import MailingRequests, UserRequests
+from data.url import HEADERS, base_url
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
+from utils.fsm_states import MailingFSM
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +17,26 @@ admin_mailing_router.message.filter(
     ChatTypeFilter("private"),
     IsGroupAdmin(ADMIN_CHAT_ID, show_message=False)
 )
+
+async def make_api_request(method: str, endpoint: str, data: dict = None):
+    """Универсальный метод для API запросов"""
+    url = f"{base_url}/{endpoint}"
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.request(
+                method=method,
+                url=url,
+                json=data,
+                headers=HEADERS
+            ) as response:
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientError as e:
+            logger.error(f"API request error to {url}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error during API request to {url}: {e}")
+            return None
 
 
 @admin_mailing_router.message(F.text == "📢 Рассылка")
@@ -146,39 +163,36 @@ async def download_image(callback: CallbackQuery, image_id: str) -> str:
 
 @admin_mailing_router.callback_query(F.data == "accept_send_mailing")
 async def send_mailing(callback: CallbackQuery, state: FSMContext):
-    """Отправка рассылки"""
+    """Отправка рассылки через API бэкенда"""
     data = await state.get_data()
-    text = data.get("text")
-    image = data.get("image")
-    button_url = data.get("button_url")
-    
-    users = await UserRequests.get_all_users()
-    for user in users:
+    mailing_data = {
+        "text": data.get("text"),
+        "image": data.get("image"),
+        "button_url": data.get("button_url"),
+        "type": "other",
+        "tg_user_id": callback.from_user.id  # Передаем Telegram ID
+    }
+
+    async with aiohttp.ClientSession() as session:
         try:
-            if image:
-                if button_url:
-                    await callback.message.bot.send_photo(chat_id=user.tg_id, photo=image, caption=text, reply_markup=await admin_link_keyboard(button_url))
+            async with session.post(
+                    f"{base_url}/mailings/",
+                    json=mailing_data,
+                    headers={"Content-Type": "application/json"}
+            ) as resp:
+                if resp.status == 201:
+                    await callback.message.answer("✅ Рассылка создана и отправлена!")
                 else:
-                    await callback.message.bot.send_photo(chat_id=user.tg_id, photo=image, caption=text)
-            else:
-                if button_url:
-                    await callback.message.bot.send_message(chat_id=user.tg_id, text=text, reply_markup=await admin_link_keyboard(button_url))
-                else:
-                    await callback.message.bot.send_message(chat_id=user.tg_id, text=text)
+                    error = await resp.text()
+                    await callback.message.answer(f"⚠️ Ошибка: {error}")
+
         except Exception as e:
-            logger.error(f"Ошибка при отправке рассылки пользователю {user.tg_id}: {e}")
-    await callback.message.answer("Рассылка отправлена всем пользователям!")
+            logger.error(f"Ошибка при создании рассылки: {e}")
+            await callback.message.answer("⚠️ Ошибка при создании рассылки")
+
     await callback.answer()
-    image = await download_image(callback, image) if image else None
-    await MailingRequests.create_mailing(
-        from_user=await UserRequests.get_by_tg_id(callback.from_user.id),
-        text=text,
-        image=image,
-        button_url=button_url,
-        type = "other",
-    )
     await state.clear()
-    
+
 
 @admin_mailing_router.callback_query(F.data == "cancel_send_mailing")
 async def cancel_send_mailing(callback: CallbackQuery, state: FSMContext):

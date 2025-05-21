@@ -4,7 +4,6 @@ import os
 import sys
 
 from aiogram import Bot, Dispatcher, types
-from typing import Optional
 from data.config import config_settings
 
 from aiogram.client.default import DefaultBotProperties
@@ -13,8 +12,8 @@ from aiogram.enums import ParseMode
 from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
 from cmds.bot_cmds_list import bot_cmds_list
-from handlers.profile_handler import profile_router
-from handlers.start_handler import start_router
+from client.handlers.profile_handler import profile_router
+from client.handlers.start_handler import start_router
 
 from utils.services import notify_restart
 from dotenv import load_dotenv

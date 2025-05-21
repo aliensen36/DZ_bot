@@ -5,7 +5,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, CallbackQuery
 from aiogram import F
 
-from keyboards.inline import get_profile_inline_kb
+from client.keyboards.inline import get_profile_inline_kb
 
 
 profile_router = Router()

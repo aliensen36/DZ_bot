@@ -3,10 +3,9 @@ import aiohttp
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
-from aiohttp import ClientError, ClientConnectorError, ServerTimeoutError, ContentTypeError
-import asyncio
+from aiohttp import ClientConnectorError, ServerTimeoutError
 from data.url import url_users
-from keyboards.reply import main_kb
+from client.keyboards.reply import main_kb
 
 logger = logging.getLogger(__name__)
 
