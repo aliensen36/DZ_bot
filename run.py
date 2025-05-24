@@ -1,38 +1,46 @@
 import asyncio
 import logging
+import os
 import sys
 
 from aiogram import Bot, Dispatcher, types
-from typing import Optional
+from data.config import config_settings
+
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 
 from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
 from cmds.bot_cmds_list import bot_cmds_list
-from database.engine import init_db, close_db
-from handlers.profile_handler import profile_router
-from handlers.start_handler import start_router
-from config import TOKEN, PROPERTIES
-from utils.services import notify_restart
+from client.handlers.profile_handler import profile_router
+from client.handlers.start_handler import start_router
 
+from utils.services import notify_restart
+from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
-bot = Bot(token=TOKEN,
+load_dotenv()
+
+TOKEN = os.getenv("TOKEN")
+
+PROPERTIES = DefaultBotProperties(parse_mode=ParseMode.HTML)
+
+bot = Bot(token=config_settings.TOKEN.get_secret_value(),
           default=PROPERTIES)
 
 async def startup(dispatcher: Dispatcher):
     logger.info("Starting bot...")
     await notify_restart(bot, "работает")
-    try:
-        await init_db()
-    except Exception as e:
-        logger.error(f"Database error: {e}")
-        raise
+    # try:
+    #     await init_db()
+    # except Exception as e:
+    #     logger.error(f"Database error: {e}")
+    #     raise
 
 
 async def shutdown(dispatcher: Dispatcher):
     logger.info("Shutting down...")
     await notify_restart(bot, "остановлен")
-    await close_db()
     sys.exit(0)
 
 
@@ -62,6 +70,7 @@ async def main():
         logger.critical(f"Bot crashed: {e}")
     finally:
         logger.info("Bot stopped")
+        await bot.session.close()
 
 
 if __name__ == "__main__":

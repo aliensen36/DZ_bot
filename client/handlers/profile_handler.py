@@ -5,7 +5,7 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import Message, CallbackQuery
 from aiogram import F
 
-from keyboards.inline import get_profile_inline_kb
+from client.keyboards.inline import get_profile_inline_kb
 
 
 profile_router = Router()
@@ -30,7 +30,7 @@ async def my_data_handler(callback: CallbackQuery):
     try:
         user_data_message = (
             "🪪 <b>Основные данные:</b>\n\n"
-            "└ 🔖 <i>ФИО:</i> <code>Иванов Иван</code>\n"
+            "└ 🔖 <i>ФИ:</i> <code>Иванов Иван</code>\n"
             "└ 🎂 <i>Дата рождения:</i> <code>01.01.2001</code>\n\n"
             "📊 <b>Статистика:</b>\n\n"
             "└ ⏱ <i>В системе:</i> <code>2 года 3 месяца</code>\n"
