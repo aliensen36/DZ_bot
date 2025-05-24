@@ -6,7 +6,7 @@ from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from admin.keyboards.admin_inline import mailing_keyboard, admin_link_keyboard, accept_mailing_kb
 from admin.keyboards.admin_reply import admin_keyboard
-from data.url import HEADERS, base_url
+from data.url import *
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 from utils.fsm_states import MailingFSM
 
@@ -17,26 +17,6 @@ admin_mailing_router.message.filter(
     ChatTypeFilter("private"),
     IsGroupAdmin(ADMIN_CHAT_ID, show_message=False)
 )
-
-async def make_api_request(method: str, endpoint: str, data: dict = None):
-    """Универсальный метод для API запросов"""
-    url = f"{base_url}/{endpoint}"
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.request(
-                method=method,
-                url=url,
-                json=data,
-                headers=HEADERS
-            ) as response:
-                response.raise_for_status()
-                return await response.json()
-        except aiohttp.ClientError as e:
-            logger.error(f"API request error to {url}: {e}")
-            return None
-        except Exception as e:
-            logger.error(f"Unexpected error during API request to {url}: {e}")
-            return None
 
 
 @admin_mailing_router.message(F.text == "📢 Рассылка")
@@ -163,33 +143,143 @@ async def download_image(callback: CallbackQuery, image_id: str) -> str:
 
 @admin_mailing_router.callback_query(F.data == "accept_send_mailing")
 async def send_mailing(callback: CallbackQuery, state: FSMContext):
-    """Отправка рассылки через API бэкенда"""
+    """Отправка рассылки всем пользователям через API бэкенда"""
     data = await state.get_data()
-    mailing_data = {
-        "text": data.get("text"),
-        "image": data.get("image"),
-        "button_url": data.get("button_url"),
-        "type": "other",
-        "tg_user_id": callback.from_user.id  # Передаем Telegram ID
-    }
+    text = data.get("text")
+    image_id = data.get("image")
+    button_url = data.get("button_url")
 
-    async with aiohttp.ClientSession() as session:
+    # 1. Получаем список всех пользователей через API
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url_users) as response:
+                if response.status != 200:
+                    error = await response.text()
+                    logger.error(f"API users error: {response.status} - {error}")
+                    await callback.message.answer("⚠️ Ошибка при получении списка пользователей")
+                    await state.clear()
+                    return
+
+                users = await response.json()
+                if not isinstance(users, list):
+                    logger.error(f"Некорректный формат пользователей: {type(users)}")
+                    await callback.message.answer("⚠️ Некорректный формат данных пользователей")
+                    await state.clear()
+                    return
+
+    except Exception as e:
+        logger.error(f"Ошибка при получении пользователей: {e}")
+        await callback.message.answer("⚠️ Ошибка соединения с сервером")
+        await state.clear()
+        return
+
+    if not users:
+        await callback.message.answer("ℹ️ Нет пользователей для рассылки")
+        await state.clear()
+        return
+
+    # 2. Подготовка данных для рассылки
+    reply_markup = await admin_link_keyboard(button_url) if button_url else None
+    total_users = len(users)
+    success = 0
+    failed = 0
+    failed_users = []
+
+    progress_msg = await callback.message.answer(f"🚀 Начата рассылка для {total_users} пользователей...\n"
+                                                 f"⏳ Обработано: 0/{total_users}")
+
+    # 3. Отправка сообщений с ограничением скорости и прогрессом
+    for index, user in enumerate(users, 1):
         try:
-            async with session.post(
-                    f"{base_url}/mailings/",
-                    json=mailing_data,
-                    headers={"Content-Type": "application/json"}
-            ) as resp:
-                if resp.status == 201:
-                    await callback.message.answer("✅ Рассылка создана и отправлена!")
-                else:
-                    error = await resp.text()
-                    await callback.message.answer(f"⚠️ Ошибка: {error}")
+            tg_id = user.get("tg_id")
+            if not tg_id:
+                logger.error(f"У пользователя отсутствует tg_id: {user}")
+                failed += 1
+                failed_users.append(f"ID:{user.get('id')} (нет tg_id)")
+                continue
+
+            if image_id:
+                await callback.bot.send_photo(
+                    chat_id=tg_id,
+                    photo=image_id,
+                    caption=text,
+                    reply_markup=reply_markup
+                )
+            else:
+                await callback.bot.send_message(
+                    chat_id=tg_id,
+                    text=text,
+                    reply_markup=reply_markup
+                )
+            success += 1
+
+            # Обновление прогресса каждые 10% или 20 пользователей
+            if index % max(20, total_users // 10) == 0 or index == total_users:
+                try:
+                    await progress_msg.edit_text(
+                        f"🚀 Рассылка в процессе...\n"
+                        f"⏳ Обработано: {index}/{total_users}\n"
+                        f"✅ Успешно: {success}\n"
+                        f"❌ Ошибок: {failed}"
+                    )
+                except:
+                    pass
+
+            # Ограничение скорости (30 сообщений в секунду - лимит Telegram)
+            if index % 30 == 0:
+                await asyncio.sleep(1)
 
         except Exception as e:
-            logger.error(f"Ошибка при создании рассылки: {e}")
-            await callback.message.answer("⚠️ Ошибка при создании рассылки")
+            logger.error(f"Ошибка при отправке пользователю {tg_id}: {e}")
+            failed += 1
+            failed_users.append(str(tg_id))
+            continue
 
+    # 4. Сохраняем рассылку через API
+    mailing_data = {
+        "text": text,
+        "image": await download_image(callback, image_id) if image_id else None,
+        "button_url": button_url,
+        "type": "other",
+        "tg_user_id": callback.from_user.id,
+        "total_recipients": total_users,
+        "successful_deliveries": success,
+        "failed_deliveries": failed
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                    url_mailing,
+                    json=mailing_data,
+                    headers={"Content-Type": "application/json"}
+            ) as response:
+                if response.status != 201:
+                    error = await response.text()
+                    logger.error(f"Ошибка сохранения рассылки: {response.status} - {error}")
+    except Exception as e:
+        logger.error(f"Ошибка при сохранении рассылки: {e}")
+
+    # 5. Отправляем отчет
+    try:
+        await progress_msg.delete()
+    except:
+        pass
+
+    report = (
+        f"📊 Рассылка завершена!\n"
+        f"• Всего пользователей: {total_users}\n"
+        f"• Успешно отправлено: {success}\n"
+        f"• Не удалось отправить: {failed}"
+    )
+
+    if failed > 0:
+        failed_samples = ", ".join(failed_users[:10])
+        report += f"\n\nНе удалось отправить: {failed_samples}"
+        if failed > 10:
+            report += f" и ещё {failed - 10}"
+
+    await callback.message.answer(report, reply_markup=admin_keyboard())
     await callback.answer()
     await state.clear()
 
