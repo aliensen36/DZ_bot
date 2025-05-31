@@ -14,6 +14,7 @@ from admin.handlers.mailing_handler import admin_mailing_router
 from cmds.bot_cmds_list import bot_cmds_list
 from client.handlers.profile_handler import profile_router
 from client.handlers.start_handler import start_router
+from client.handlers.loyalty_handler import loyalty_router
 
 from utils.services import notify_restart
 from dotenv import load_dotenv
@@ -51,6 +52,7 @@ def setup_routers(dp: Dispatcher) -> None:
         profile_router,
         admin_router,
         admin_mailing_router,
+        loyalty_router,
     )
     for router in routers:
         dp.include_router(router)
