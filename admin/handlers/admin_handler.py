@@ -1,13 +1,10 @@
-import datetime
 import logging
 from urllib.parse import urlparse
-
 import aiohttp
-from aiogram import Router, types, F, Bot
+from aiogram import Router, F, Bot
 from aiogram.filters import Command
-from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, InlineKeyboardButton, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, BufferedInputFile
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from pandas import NaT, isna
 from openpyxl.styles import Alignment, Font, PatternFill, Border, Side
 from aiohttp import ClientError, ClientConnectionError, ServerTimeoutError
 import socket
@@ -16,10 +13,15 @@ import pandas as pd
 from io import BytesIO
 from datetime import datetime as dt
 
+from client.keyboards.reply import main_kb
 from data.url import url_users
+from data.config import config_settings
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
+
+BOT_API_KEY = config_settings.bot_api_key.get_secret_value()
+
 
 admin_router = Router()
 admin_router.message.filter(
@@ -32,15 +34,23 @@ async def generate_excel_report():
     """
     Генерация отчета в Excel с данными пользователей
     """
+    if not BOT_API_KEY:
+        logger.error("BOT_API_KEY не установлен")
+        return None
+
     async with aiohttp.ClientSession() as session:
         try:
-            async with session.get(url_users) as resp:
+            async with session.get(
+                    url_users,
+                    headers={'X-API-Key': BOT_API_KEY}
+            ) as resp:
                 if resp.status != 200:
-                    print(f"Ошибка при получении пользователей: {resp.status}")
+                    error_text = await resp.text()
+                    logger.error(f"Ошибка при получении пользователей: {resp.status}, {error_text}")
                     return None
                 users = await resp.json()
         except Exception as e:
-            print(f"Ошибка запроса: {e}")
+            logger.error(f"Ошибка запроса: {e}")
             return None
 
     if not users:
@@ -135,43 +145,44 @@ async def admin_panel(message: Message, bot: Bot):
 @admin_router.message(F.text == "📊 Статистика")
 async def show_statistics(message: Message):
     try:
-        # Проверка соединения с сервером перед запросом
+        # Проверка соединения с сервером
         try:
-            # Парсим URL для получения хоста и порта
             parsed_url = urlparse(url_users)
             host = parsed_url.hostname
             port = parsed_url.port or (80 if parsed_url.scheme == 'http' else 443)
-
-            # Проверяем доступность сервера
             with socket.create_connection((host, port), timeout=3):
                 pass
-
         except (socket.timeout, ConnectionRefusedError, OSError) as e:
             logger.error(f"Сервер недоступен: {e}")
-            await message.answer("🔴 Сервер статистики временно недоступен. "
-                                 "Попробуйте позже.")
+            await message.answer("🔴 Сервер статистики временно недоступен. Попробуйте позже.")
             return
         except Exception as e:
             logger.error(f"Ошибка проверки соединения: {e}")
             await message.answer("⚠️ Ошибка при проверке доступности сервера")
             return
 
+        if not BOT_API_KEY:
+            logger.error("BOT_API_KEY не установлен")
+            await message.answer("⚠️ Ошибка конфигурации сервера")
+            return
+
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             try:
-                async with session.get(url_users) as resp:
+                async with session.get(
+                    url_users,
+                    headers={'X-API-Key': BOT_API_KEY}
+                ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
                         logger.error(f"API error {resp.status}: {error_text}")
                         await message.answer(f"⚠️ Ошибка сервера {resp.status}. Попробуйте позже.")
                         return
-
                     try:
                         users = await resp.json()
                     except ValueError as e:
                         logger.error(f"Invalid JSON response: {e}")
                         await message.answer("⚠️ Ошибка обработки данных сервера")
                         return
-
             except ServerTimeoutError as e:
                 logger.error(f"Timeout error: {e}")
                 await message.answer("⏳ Сервер не отвечает. Попробуйте позже.")
@@ -234,5 +245,5 @@ async def export_users_excel(callback: CallbackQuery):
 async def exit_admin_panel(message: Message):
     await message.answer(
         "Выход из админ-панели",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=main_kb
     )

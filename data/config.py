@@ -7,10 +7,13 @@ class Settings(BaseSettings):
     TOKEN: SecretStr
     ADMIN_CHAT_ID: int
     base_url: str
+    bot_api_key: SecretStr
     # APP_URL: str
 
     model_config = SettingsConfigDict(env_file='.env',
-                                      env_file_encoding='utf-8')
+                                      env_file_encoding='utf-8',
+                                      case_sensitive=False
+                                      )
 
 
 config_settings = Settings()

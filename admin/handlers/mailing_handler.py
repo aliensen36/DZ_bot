@@ -12,6 +12,8 @@ from utils.fsm_states import MailingFSM
 
 logger = logging.getLogger(__name__)
 
+BOT_API_KEY = config_settings.bot_api_key.get_secret_value()
+
 admin_mailing_router = Router()
 admin_mailing_router.message.filter(
     ChatTypeFilter("private"),
@@ -150,9 +152,18 @@ async def send_mailing(callback: CallbackQuery, state: FSMContext):
     button_url = data.get("button_url")
 
     # 1. Получаем список всех пользователей через API
+    if not BOT_API_KEY:
+        logger.error("BOT_API_KEY не установлен")
+        await callback.message.answer("⚠️ Ошибка конфигурации сервера")
+        await state.clear()
+        return
+
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url_users) as response:
+            async with session.get(
+                url_users,
+                headers={'X-API-Key': BOT_API_KEY}
+            ) as response:
                 if response.status != 200:
                     error = await response.text()
                     logger.error(f"API users error: {response.status} - {error}")
@@ -185,8 +196,10 @@ async def send_mailing(callback: CallbackQuery, state: FSMContext):
     failed = 0
     failed_users = []
 
-    progress_msg = await callback.message.answer(f"🚀 Начата рассылка для {total_users} пользователей...\n"
-                                                 f"⏳ Обработано: 0/{total_users}")
+    progress_msg = await callback.message.answer(
+        f"🚀 Начата рассылка для {total_users} пользователей...\n"
+        f"⏳ Обработано: 0/{total_users}"
+    )
 
     # 3. Отправка сообщений с ограничением скорости и прогрессом
     for index, user in enumerate(users, 1):
@@ -250,9 +263,9 @@ async def send_mailing(callback: CallbackQuery, state: FSMContext):
     try:
         async with aiohttp.ClientSession() as session:
             async with session.post(
-                    url_mailing,
-                    json=mailing_data,
-                    headers={"Content-Type": "application/json"}
+                url_mailing,
+                json=mailing_data,
+                headers={"Content-Type": "application/json"}
             ) as response:
                 if response.status != 201:
                     error = await response.text()
