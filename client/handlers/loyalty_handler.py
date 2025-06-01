@@ -1,13 +1,18 @@
 import logging
+import re
+from datetime import datetime
 
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, BufferedInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import aiohttp
+
 from data.url import url_loyalty, url_users
 
-from datetime import datetime
+# Регулярные выражения для валидации
+name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
+email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +24,6 @@ class LoyaltyCardForm(StatesGroup):
     first_name = State()
     birth_date = State()
     email = State()
-
 
 # Запрос карты
 async def fetch_loyalty_card(user_id: int):
@@ -52,12 +56,18 @@ async def update_user_data(user_id: int, first_name: str, last_name: str, birth_
 # Создание карты
 async def create_loyalty_card(user_id: int):
     payload = {
-        "user": user_id
+        "user_id": user_id
     }
     async with aiohttp.ClientSession() as session:
         async with session.post(url_loyalty, json=payload) as resp:
             if resp.status == 201:
                 return await resp.json()
+            elif resp.status == 400:
+                text = await resp.text()
+                if "у вас уже есть карта" in text.lower():
+                    return None
+                else:
+                    raise Exception(f"Ошибка создания карты: {text}")
             else:
                 raise Exception(f"Ошибка создания карты: {await resp.text()}")
 
@@ -66,6 +76,11 @@ async def create_loyalty_card(user_id: int):
 @loyalty_router.message(F.text.lower() == "💳 карта лояльности")
 async def handle_loyalty_request(message: Message, state: FSMContext):
     user_id = message.from_user.id
+
+    # Очистка текущего состояния FSM
+    await state.clear()
+
+    # Поиск карты лояльности
     card = await fetch_loyalty_card(user_id)
 
     if card:
@@ -75,27 +90,35 @@ async def handle_loyalty_request(message: Message, state: FSMContext):
                 async with session.get(card_image_url) as img_resp:
                     if img_resp.status == 200:
                         img_bytes = await img_resp.read()
-                        await message.answer_photo(
-                            photo=img_bytes,
-                            caption=f"🎁 Ваша карта лояльности:\nНомер: {card['card_number']}"
-                        )
+                        image = BufferedInputFile(img_bytes, filename="loyalty_card.png")
+                        await message.answer_photo(photo=image)
                         return
         await message.answer("Карта найдена, но изображение недоступно.")
-    else:
-        await state.set_state(LoyaltyCardForm.last_name)
-        await message.answer("Введите вашу фамилию:")
+        return
+
+    # Если карты нет — запускаем FSM
+    await state.set_state(LoyaltyCardForm.last_name)
+    await message.answer("Введите вашу фамилию:")
 
 
 @loyalty_router.message(LoyaltyCardForm.last_name)
 async def collect_last_name(message: Message, state: FSMContext):
-    await state.update_data(last_name=message.text)
+    if not name_pattern.fullmatch(message.text.strip()):
+        await message.answer("⚠️ Фамилия должна содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
+        return
+
+    await state.update_data(last_name=message.text.strip())
     await state.set_state(LoyaltyCardForm.first_name)
     await message.answer("Введите ваше имя:")
 
 
 @loyalty_router.message(LoyaltyCardForm.first_name)
 async def collect_first_name(message: Message, state: FSMContext):
-    await state.update_data(first_name=message.text)
+    if not name_pattern.fullmatch(message.text.strip()):
+        await message.answer("⚠️ Имя должно содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
+        return
+
+    await state.update_data(first_name=message.text.strip())
     await state.set_state(LoyaltyCardForm.birth_date)
     await message.answer("Введите дату рождения (в формате ДД.ММ.ГГГГ):")
 
@@ -116,12 +139,15 @@ async def collect_birth_date(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.email)
 async def collect_email_and_create(message: Message, state: FSMContext):
-    await state.update_data(email=message.text)
+    if not email_pattern.fullmatch(message.text.strip()):
+        await message.answer("⚠️ Неверный формат email. Попробуйте снова:")
+        return
+
+    await state.update_data(email=message.text.strip())
     data = await state.get_data()
     user_id = message.from_user.id
 
     try:
-        # Обновляем данные пользователя
         await update_user_data(
             user_id=user_id,
             first_name=data["first_name"],
@@ -130,37 +156,39 @@ async def collect_email_and_create(message: Message, state: FSMContext):
             email=data["email"]
         )
 
-        # Создаём карту
         card = await create_loyalty_card(user_id)
-        card_image_url = card.get("card_image")
 
+        # Если карта уже есть — получаем её
+        if card is None:
+            card = await fetch_loyalty_card(user_id)
+
+        card_image_url = card.get("card_image")
         if not card_image_url:
-            await message.answer("Карта создана, но изображение отсутствует.")
+            await message.answer("Карта найдена, но изображение отсутствует.")
             return
 
-        # Загружаем и отправляем изображение карты
         async with aiohttp.ClientSession() as session:
             async with session.get(card_image_url) as img_resp:
                 if img_resp.status == 200:
                     img_bytes = await img_resp.read()
+                    image = BufferedInputFile(img_bytes, filename="loyalty_card.png")
                     await message.answer_photo(
-                        photo=img_bytes,
-                        caption=f"🎉 Ваша карта лояльности готова!\nНомер: {card['card_number']}"
+                        photo=image,
                     )
                 else:
-                    await message.answer("Карта создана, но не удалось загрузить изображение.")
+                    await message.answer("Карта найдена, но не удалось загрузить изображение.")
 
     except Exception as e:
-        error_text = str(e)
         logger.exception("Ошибка при создании карты пользователя")
 
-        # Обработка случаев, когда сервер возвращает HTML
+        error_text = str(e)
         if "DOCTYPE html" in error_text:
-            short_message = "❌ Сервер вернул HTML. Проверь консоль или логи Django!"
+            short_message = "Сервер вернул HTML. Проверь консоль или логи Django!"
         elif len(error_text) > 3000:
-            short_message = f"❌ Ошибка: {error_text[:3000]}..."
+            short_message = f"Ошибка: {error_text[:3000]}..."
         else:
-            short_message = f"❌ Ошибка: {error_text}"
+            short_message = f"Ошибка: {error_text}"
 
         await message.answer(short_message, parse_mode=None)
+
     await state.clear()
