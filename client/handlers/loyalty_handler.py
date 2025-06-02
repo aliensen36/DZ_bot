@@ -27,14 +27,20 @@ class LoyaltyCardForm(StatesGroup):
 
 # Запрос карты
 async def fetch_loyalty_card(user_id: int):
-    async with aiohttp.ClientSession() as session:
-        async with session.get(f"{url_loyalty}{user_id}/") as resp:
-            if resp.status == 200:
-                return await resp.json()
-            elif resp.status == 404:
-                return None
-            else:
-                raise Exception(f"Ошибка получения карты: {await resp.text()}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{url_loyalty}{user_id}/") as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                elif resp.status == 404:
+                    return None
+                else:
+                    text = await resp.text()
+                    logger.error(f"Ошибка получения карты (user_id={user_id}): {resp.status} — {text}")
+                    return None
+    except Exception as e:
+        logger.exception(f"Исключение при получении карты (user_id={user_id})")
+        return None
 
 
 # Обновление данных юзера
@@ -45,60 +51,74 @@ async def update_user_data(user_id: int, first_name: str, last_name: str, birth_
         "birth_date": birth_date,
         "email": email
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.patch(f"{url_users}{user_id}/", json=payload) as resp:
-            if resp.status == 200:
-                return await resp.json()
-            else:
-                raise Exception(f"Ошибка обновления пользователя: {await resp.text()}")
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(f"{url_users}{user_id}/", json=payload) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+                else:
+                    text = await resp.text()
+                    logger.error(f"Ошибка обновления пользователя (user_id={user_id}): {resp.status} — {text}")
+                    raise RuntimeError("Ошибка при обновлении данных. Попробуйте позже.")
+    except Exception as e:
+        logger.exception(f"Исключение при обновлении данных пользователя (user_id={user_id})")
+        raise RuntimeError("Произошла ошибка при сохранении данных.")
 
 
 # Создание карты
 async def create_loyalty_card(user_id: int):
-    payload = {
-        "user_id": user_id
-    }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url_loyalty, json=payload) as resp:
-            if resp.status == 201:
-                return await resp.json()
-            elif resp.status == 400:
-                text = await resp.text()
-                if "у вас уже есть карта" in text.lower():
-                    return None
+    payload = {"user_id": user_id}
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url_loyalty, json=payload) as resp:
+                if resp.status == 201:
+                    return await resp.json()
+                elif resp.status == 400:
+                    text = await resp.text()
+                    if "у вас уже есть карта" in text.lower():
+                        return None
+                    logger.warning(f"Ошибка создания карты (user_id={user_id}): {text}")
+                    raise RuntimeError("Не удалось создать карту. Проверьте данные или попробуйте позже.")
                 else:
-                    raise Exception(f"Ошибка создания карты: {text}")
-            else:
-                raise Exception(f"Ошибка создания карты: {await resp.text()}")
+                    text = await resp.text()
+                    logger.error(f"Ошибка создания карты (user_id={user_id}): {resp.status} — {text}")
+                    raise RuntimeError("Не удалось создать карту. Повторите позже.")
+    except Exception as e:
+        logger.exception(f"Исключение при создании карты (user_id={user_id})")
+        raise RuntimeError("Произошла ошибка при создании карты.")
 
 
 # Запуск процесса
 @loyalty_router.message(F.text.lower() == "💳 карта лояльности")
 async def handle_loyalty_request(message: Message, state: FSMContext):
     user_id = message.from_user.id
-
-    # Очистка текущего состояния FSM
     await state.clear()
 
-    # Поиск карты лояльности
-    card = await fetch_loyalty_card(user_id)
+    try:
+        card = await fetch_loyalty_card(user_id)
 
-    if card:
-        card_image_url = card.get("card_image")
-        if card_image_url:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(card_image_url) as img_resp:
-                    if img_resp.status == 200:
-                        img_bytes = await img_resp.read()
-                        image = BufferedInputFile(img_bytes, filename="loyalty_card.png")
-                        await message.answer_photo(photo=image)
-                        return
-        await message.answer("Карта найдена, но изображение недоступно.")
-        return
+        if card:
+            card_image_url = card.get("card_image")
+            if card_image_url:
+                async with aiohttp.ClientSession() as session:
+                    async with session.get(card_image_url) as img_resp:
+                        if img_resp.status == 200:
+                            img_bytes = await img_resp.read()
+                            image = BufferedInputFile(img_bytes, filename="loyalty_card.png")
+                            await message.answer_photo(photo=image)
+                            return
+                        else:
+                            logger.warning(f"Изображение карты недоступно (status={img_resp.status}) для user_id={user_id}")
+            await message.answer("Карта найдена, но изображение недоступно. Попробуйте позже или обратитесь в поддержку.")
+            return
 
-    # Если карты нет — запускаем FSM
-    await state.set_state(LoyaltyCardForm.last_name)
-    await message.answer("Введите вашу фамилию:")
+        # Если карты нет — запускаем FSM
+        await state.set_state(LoyaltyCardForm.last_name)
+        await message.answer("Введите вашу фамилию:")
+
+    except Exception as e:
+        logger.exception(f"Ошибка при обработке запроса карты для user_id={user_id}")
+        await message.answer("Произошла ошибка при получении карты. Попробуйте позже или обратитесь в поддержку.")
 
 
 @loyalty_router.message(LoyaltyCardForm.last_name)
@@ -172,23 +192,14 @@ async def collect_email_and_create(message: Message, state: FSMContext):
                 if img_resp.status == 200:
                     img_bytes = await img_resp.read()
                     image = BufferedInputFile(img_bytes, filename="loyalty_card.png")
-                    await message.answer_photo(
-                        photo=image,
-                    )
+                    await message.answer_photo(photo=image)
                 else:
+                    logger.warning(f"Не удалось загрузить изображение карты: {img_resp.status}")
                     await message.answer("Карта найдена, но не удалось загрузить изображение.")
-
     except Exception as e:
-        logger.exception("Ошибка при создании карты пользователя")
-
-        error_text = str(e)
-        if "DOCTYPE html" in error_text:
-            short_message = "Сервер вернул HTML. Проверь консоль или логи Django!"
-        elif len(error_text) > 3000:
-            short_message = f"Ошибка: {error_text[:3000]}..."
-        else:
-            short_message = f"Ошибка: {error_text}"
-
-        await message.answer(short_message, parse_mode=None)
-
-    await state.clear()
+        logger.exception("Ошибка при создании или загрузке карты")
+        await message.answer(
+            "Произошла ошибка при обработке запроса. Попробуйте позже или обратитесь в поддержку."
+        )
+    finally:
+        await state.clear()
