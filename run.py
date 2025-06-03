@@ -50,9 +50,9 @@ def setup_routers(dp: Dispatcher) -> None:
     routers = (
         start_router,
         profile_router,
+        loyalty_router,
         admin_router,
         admin_mailing_router,
-        loyalty_router,
     )
     for router in routers:
         dp.include_router(router)
