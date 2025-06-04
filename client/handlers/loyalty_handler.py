@@ -13,6 +13,7 @@ from data.url import url_loyalty, url_users
 # Регулярные выражения для валидации
 name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
 email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
+phone_pattern = re.compile(r"^\+?\d{10,15}$")
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class LoyaltyCardForm(StatesGroup):
     last_name = State()
     first_name = State()
     birth_date = State()
+    phone_number = State()
     email = State()
 
 # Запрос карты
@@ -44,11 +46,12 @@ async def fetch_loyalty_card(user_id: int):
 
 
 # Обновление данных юзера
-async def update_user_data(user_id: int, first_name: str, last_name: str, birth_date: str, email: str):
+async def update_user_data(user_id: int, first_name: str, last_name: str, birth_date: str, phone_number: str, email: str):
     payload = {
         "user_first_name": first_name,
         "user_last_name": last_name,
         "birth_date": birth_date,
+        "phone_number": phone_number,
         "email": email
     }
     try:
@@ -153,6 +156,19 @@ async def collect_birth_date(message: Message, state: FSMContext):
         return
 
     await state.update_data(birth_date=birth_date_iso)
+    await state.set_state(LoyaltyCardForm.phone_number)
+    await message.answer("Введите ваш номер телефона:")
+
+
+@loyalty_router.message(LoyaltyCardForm.phone_number)
+async def collect_phone_number(message: Message, state: FSMContext):
+    phone = message.text.strip().replace(" ", "")
+    
+    if not phone_pattern.fullmatch(phone):
+        await message.answer("⚠️ Введите корректный номер телефона (10–15 цифр, можно с '+'). Пример: +79001234567")
+        return
+
+    await state.update_data(phone_number=phone)
     await state.set_state(LoyaltyCardForm.email)
     await message.answer("Введите ваш email:")
 
@@ -173,6 +189,7 @@ async def collect_email_and_create(message: Message, state: FSMContext):
             first_name=data["first_name"],
             last_name=data["last_name"],
             birth_date=data["birth_date"],
+            phone_number=data["phone_number"],
             email=data["email"]
         )
 
