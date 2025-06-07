@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     ADMIN_CHAT_ID: int
     base_url: str
     bot_api_key: SecretStr
-    # APP_URL: str
+    APP_URL: str
 
     model_config = SettingsConfigDict(env_file='.env',
                                       env_file_encoding='utf-8',
