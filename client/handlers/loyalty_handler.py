@@ -3,11 +3,12 @@ import re
 from datetime import datetime
 
 from aiogram import Router, F
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import Message, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import aiohttp
 
+from client.keyboards.reply import main_kb
 from data.url import url_loyalty, url_users
 
 # Регулярные выражения для валидации
@@ -157,20 +158,43 @@ async def collect_birth_date(message: Message, state: FSMContext):
 
     await state.update_data(birth_date=birth_date_iso)
     await state.set_state(LoyaltyCardForm.phone_number)
-    await message.answer("Введите ваш номер телефона:")
+
+    # Создаем клавиатуру с кнопкой "Поделиться номером"
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Поделиться номером", request_contact=True)]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await message.answer(
+        "Введите ваш номер телефона или нажмите кнопку ниже:",
+        reply_markup=keyboard
+    )
 
 
 @loyalty_router.message(LoyaltyCardForm.phone_number)
 async def collect_phone_number(message: Message, state: FSMContext):
-    phone = message.text.strip().replace(" ", "")
-    
+    # Обработка случая, когда пользователь нажал кнопку "Поделиться номером"
+    if message.contact:
+        phone = message.contact.phone_number
+    else:
+        phone = message.text.strip().replace(" ", "")
+
     if not phone_pattern.fullmatch(phone):
-        await message.answer("⚠️ Введите корректный номер телефона (10–15 цифр, можно с '+'). Пример: +79001234567")
+        await message.answer(
+            "⚠️ Введите корректный номер телефона (10–15 цифр, можно с '+'). Пример: +79001234567",
+            reply_markup=ReplyKeyboardRemove()  # Убираем клавиатуру после ввода
+        )
         return
 
     await state.update_data(phone_number=phone)
     await state.set_state(LoyaltyCardForm.email)
-    await message.answer("Введите ваш email:")
+    await message.answer(
+        "Введите ваш email:",
+        reply_markup=ReplyKeyboardRemove()  # Убираем клавиатуру перед следующим шагом
+    )
 
 
 @loyalty_router.message(LoyaltyCardForm.email)
@@ -201,7 +225,8 @@ async def collect_email_and_create(message: Message, state: FSMContext):
 
         card_image_url = card.get("card_image")
         if not card_image_url:
-            await message.answer("Карта найдена, но изображение отсутствует.")
+            await message.answer("Карта найдена, но изображение отсутствует.",
+                                 reply_markup=main_kb)
             return
 
         async with aiohttp.ClientSession() as session:
@@ -212,11 +237,12 @@ async def collect_email_and_create(message: Message, state: FSMContext):
                     await message.answer_photo(photo=image)
                 else:
                     logger.warning(f"Не удалось загрузить изображение карты: {img_resp.status}")
-                    await message.answer("Карта найдена, но не удалось загрузить изображение.")
+                    await message.answer("Карта найдена, но не удалось загрузить изображение.",
+                                         reply_markup=main_kb)
     except Exception as e:
         logger.exception("Ошибка при создании или загрузке карты")
         await message.answer(
-            "Произошла ошибка при обработке запроса. Попробуйте позже или обратитесь в поддержку."
-        )
+            "Произошла ошибка при обработке запроса. Попробуйте позже или обратитесь в поддержку.",
+            reply_markup=main_kb)
     finally:
         await state.clear()
