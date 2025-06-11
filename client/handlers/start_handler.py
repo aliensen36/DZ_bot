@@ -4,6 +4,8 @@ from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import CommandStart
 from aiohttp import ClientConnectorError, ServerTimeoutError
+
+from data.config import config_settings
 from data.url import url_users
 from client.keyboards.reply import main_kb
 
@@ -25,7 +27,11 @@ async def cmd_start(message: Message):
     try:
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             try:
-                async with session.post(url_users, json=user_data) as resp:
+                async with session.post(
+                        url_users,
+                        json=user_data,
+                        headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+                ) as resp:
                     response_data = await resp.json()
 
                     # Основная логика для успешных ответов (200 или 201)

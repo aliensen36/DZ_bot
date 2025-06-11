@@ -12,7 +12,7 @@ from utils.fsm_states import MailingFSM
 
 logger = logging.getLogger(__name__)
 
-BOT_API_KEY = config_settings.bot_api_key.get_secret_value()
+
 
 admin_mailing_router = Router()
 admin_mailing_router.message.filter(
@@ -152,7 +152,7 @@ async def send_mailing(callback: CallbackQuery, state: FSMContext):
     button_url = data.get("button_url")
 
     # 1. Получаем список всех пользователей через API
-    if not BOT_API_KEY:
+    if not config_settings.BOT_API_KEY:
         logger.error("BOT_API_KEY не установлен")
         await callback.message.answer("⚠️ Ошибка конфигурации сервера")
         await state.clear()
@@ -162,7 +162,7 @@ async def send_mailing(callback: CallbackQuery, state: FSMContext):
         async with aiohttp.ClientSession() as session:
             async with session.get(
                 url_users,
-                headers={'X-API-Key': BOT_API_KEY}
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
             ) as response:
                 if response.status != 200:
                     error = await response.text()

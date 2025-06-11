@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     TOKEN: SecretStr
     ADMIN_CHAT_ID: int
     base_url: str
-    bot_api_key: SecretStr
+    BOT_API_KEY: SecretStr
     APP_URL: str
 
     model_config = SettingsConfigDict(env_file='.env',

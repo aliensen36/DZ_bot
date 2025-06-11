@@ -1,6 +1,7 @@
 import logging
 from urllib.parse import urlparse
 import aiohttp
+import pytz
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, BufferedInputFile
@@ -12,15 +13,12 @@ from admin.keyboards.admin_reply import admin_keyboard
 import pandas as pd
 from io import BytesIO
 from datetime import datetime as dt
-
 from client.keyboards.reply import main_kb
 from data.url import url_users
 from data.config import config_settings
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 
 logger = logging.getLogger(__name__)
-
-BOT_API_KEY = config_settings.bot_api_key.get_secret_value()
 
 
 admin_router = Router()
@@ -32,33 +30,39 @@ admin_router.message.filter(
 
 async def generate_excel_report():
     """
-    Генерация отчета в Excel с данными пользователей
+    Генерация отчета в Excel с данными всех пользователей, включая данные карты лояльности, если они заполнены
     """
-    if not BOT_API_KEY:
+    if not config_settings.BOT_API_KEY:
         logger.error("BOT_API_KEY не установлен")
         return None
 
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+        # Получаем всех пользователей
         try:
             async with session.get(
-                    url_users,
-                    headers={'X-API-Key': BOT_API_KEY}
+                url_users,
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
             ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
                     logger.error(f"Ошибка при получении пользователей: {resp.status}, {error_text}")
                     return None
                 users = await resp.json()
+                logger.info(f"Получено {len(users)} пользователей")
         except Exception as e:
-            logger.error(f"Ошибка запроса: {e}")
+            logger.exception(f"Ошибка запроса пользователей: {e}")
             return None
 
     if not users:
+        logger.info("Нет данных пользователей для отчета")
         return None
 
-    # Создаем DataFrame и исключаем ненужные столбцы
-    columns_to_drop = ['id', 'password']  # Список столбцов для удаления
-    df = pd.DataFrame(users).drop(columns=columns_to_drop, errors='ignore')
+    # Создаем DataFrame
+    df = pd.DataFrame(users)
+
+    # Исключаем ненужные столбцы
+    columns_to_drop = ['id', 'password', 'groups', 'user_permissions']
+    df = df.drop(columns=columns_to_drop, errors='ignore')
 
     # Применяем преобразования к полям
     bool_columns = ['is_bot', 'is_staff', 'is_active', 'is_superuser']
@@ -73,20 +77,40 @@ async def generate_excel_report():
                 lambda x: x[:19].replace('T', ' ') if isinstance(x, str) else None
             )
 
+    # Форматируем birth_date
+    if 'birth_date' in df.columns:
+        df['birth_date'] = df['birth_date'].apply(
+            lambda x: x if isinstance(x, str) and x else None
+        )
+
     # Переименовываем колонки для красивого отображения
     column_mapping = {
         'tg_id': 'TG ID',
         'username': 'Никнейм',
-        'first_name': 'Имя',
-        'last_name': 'Фамилия',
+        'first_name': 'Имя (Telegram)',
+        'last_name': 'Фамилия (Telegram)',
+        'user_first_name': 'Имя (карта)',
+        'user_last_name': 'Фамилия (карта)',
+        'birth_date': 'Дата рождения',
+        'email': 'Email',
+        'phone_number': 'Номер телефона',
         'is_bot': 'Бот',
         'date_joined': 'Дата регистрации',
         'last_activity': 'Последняя активность',
         'is_staff': 'Админ',
         'is_active': 'Активный',
-        'is_superuser': 'Суперюзер'
+        'is_superuser': 'Суперюзер',
+        'role': 'Роль'
     }
     df.rename(columns=column_mapping, inplace=True)
+
+    # Ограничиваем колонки, чтобы включить только нужные
+    columns_to_keep = [
+        'TG ID', 'Никнейм', 'Имя (Telegram)', 'Фамилия (Telegram)',
+        'Имя (карта)', 'Фамилия (карта)', 'Дата рождения', 'Email', 'Номер телефона',
+        'Роль', 'Активный'
+    ]
+    df = df[[col for col in columns_to_keep if col in df.columns]]
 
     # Создаем Excel-файл
     output = BytesIO()
@@ -122,7 +146,6 @@ async def generate_excel_report():
             top=Side(style='thin'),
             bottom=Side(style='thin')
         )
-
         for cell in worksheet[1]:
             cell.font = header_font
             cell.fill = header_fill
@@ -130,8 +153,8 @@ async def generate_excel_report():
             cell.alignment = Alignment(horizontal='center', vertical='center')
 
     output.seek(0)
+    logger.info("Excel-отчет по всем пользователям успешно сгенерирован")
     return output
-
 
 @admin_router.message(Command("admin"))
 async def admin_panel(message: Message, bot: Bot):
@@ -140,7 +163,6 @@ async def admin_panel(message: Message, bot: Bot):
         "🛠 Админ-панель",
         reply_markup=admin_keyboard()
     )
-
 
 @admin_router.message(F.text == "📊 Статистика")
 async def show_statistics(message: Message):
@@ -161,7 +183,7 @@ async def show_statistics(message: Message):
             await message.answer("⚠️ Ошибка при проверке доступности сервера")
             return
 
-        if not BOT_API_KEY:
+        if not config_settings.BOT_API_KEY:
             logger.error("BOT_API_KEY не установлен")
             await message.answer("⚠️ Ошибка конфигурации сервера")
             return
@@ -170,7 +192,7 @@ async def show_statistics(message: Message):
             try:
                 async with session.get(
                     url_users,
-                    headers={'X-API-Key': BOT_API_KEY}
+                    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -217,7 +239,6 @@ async def show_statistics(message: Message):
         logger.error(f"Unexpected error in show_statistics: {e}", exc_info=True)
         await message.answer("⚠️ Непредвиденная ошибка при получении статистики")
 
-
 @admin_router.callback_query(F.data == "export_users_excel")
 async def export_users_excel(callback: CallbackQuery):
     try:
@@ -228,9 +249,9 @@ async def export_users_excel(callback: CallbackQuery):
             await callback.message.answer_document(
                 BufferedInputFile(
                     excel_file.getvalue(),
-                    filename=f"users_report_{dt.now().strftime('%Y%m%d_%H%M%S')}.xlsx"  # Используем dt вместо datetime
+                    filename=f"users_report_{dt.now(tz=pytz.timezone('Europe/Moscow')).strftime('%Y%m%d_%H%M%S')}.xlsx"
                 ),
-                caption="📊 Полный отчет по пользователям"
+                caption="📊 Отчет по всем пользователям"
             )
         else:
             await callback.message.answer("❌ Нет данных для выгрузки")
@@ -239,7 +260,6 @@ async def export_users_excel(callback: CallbackQuery):
         await callback.message.answer("⚠️ Произошла ошибка при генерации отчета")
     finally:
         await callback.answer()
-
 
 @admin_router.message(F.text == "🚪 Выход")
 async def exit_admin_panel(message: Message):
