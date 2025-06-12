@@ -11,6 +11,14 @@ ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
 
 class ChatTypeFilter(BaseFilter):
     def __init__(self, chat_types: Union[str, list[str]]):
+        """Фильтр для ограничения типа чата.
+
+        Args:
+            chat_types (Union[str, list[str]]): Типы чатов (например, "private") или список типов.
+
+        Returns:
+            bool: True, если тип чата соответствует, иначе False.
+        """
         self.chat_types = [chat_types] if isinstance(chat_types, str) else chat_types
 
     async def __call__(self, message: Message) -> bool:
@@ -23,6 +31,18 @@ class IsGroupAdmin(BaseFilter):
         self.show_message = show_message  # Флаг для отображения сообщения
 
     async def __call__(self, message: Message, bot: Bot) -> bool:
+        """Проверяет, является ли пользователь администратором группы.
+
+        Args:
+            message (Message): Сообщение от пользователя.
+            bot (Bot): Объект бота для проверки прав.
+
+        Returns:
+            bool: True, если пользователь администратор, иначе False.
+
+        Notes:
+            Отправляет уведомление об ошибке, если show_message=True.
+        """
         if message.chat.type == "private":
             try:
                 member = await bot.get_chat_member(self.admin_chat_id, message.from_user.id)

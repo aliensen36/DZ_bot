@@ -14,6 +14,14 @@ profile_router = Router()
 # Хендлер для кнопки "Личный кабинет"
 @profile_router.message(F.text == "👤 Личный кабинет")
 async def handle_profile(message: Message):
+    """Обрабатывает запрос на открытие личного кабинета.
+
+    Args:
+        message (Message): Сообщение с нажатием кнопки "Личный кабинет".
+
+    Notes:
+        Отправляет сообщение с инлайн-клавиатурой get_profile_inline_kb.
+    """
     try:
         await message.answer(
             "🔐 Ваш личный кабинет",
@@ -27,6 +35,14 @@ async def handle_profile(message: Message):
 # Хендлер для кнопки "Мои данные"
 @profile_router.callback_query(F.data == "my_data")
 async def my_data_handler(callback: CallbackQuery):
+    """Отображает данные пользователя в личном кабинете.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Мои данные".
+
+    Notes:
+        Редактирует сообщение с данными пользователя.
+    """
     try:
         user_data_message = (
             "🪪 <b>Основные данные:</b>\n\n"
@@ -54,6 +70,14 @@ async def my_data_handler(callback: CallbackQuery):
 # Хендлер для кнопки "Мои подписки
 @profile_router.callback_query(F.data == "my_subscriptions")
 async def my_subscriptions_handler(callback: CallbackQuery):
+    """Отображает список подписок пользователя.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Мои подписки".
+
+    Notes:
+        Редактирует сообщение со списком подписок.
+    """
     try:
         user_data_message = (
             "🔔 <b>Ваши подписки:</b>\n\n"
@@ -79,6 +103,14 @@ async def my_subscriptions_handler(callback: CallbackQuery):
 # Хендлер для кнопки "Мои бонусы"
 @profile_router.callback_query(F.data == "my_bonuses")
 async def my_bonuses_handler(callback: CallbackQuery):
+    """Отображает доступные бонусы пользователя.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Мои бонусы".
+
+    Notes:
+        Редактирует сообщение со списком бонусов.
+    """
     try:
         user_data_message = (
             "🎁 <b>Ваши бонусы</b>\n\n"
