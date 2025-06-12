@@ -1,8 +1,10 @@
 import logging
+import re
+from datetime import datetime
 
 from aiogram import Router
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram import F
@@ -15,6 +17,10 @@ from client.keyboards.reply import main_kb, edit_keyboard, edit_data_keyboard
 logger = logging.getLogger(__name__)
 
 profile_router = Router()
+
+name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
+email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
+phone_pattern = re.compile(r"^\+?\d{10,15}$")
 
 class EditUserData(StatesGroup):
     choosing_field = State()
@@ -95,7 +101,7 @@ async def edit_first_name(message: Message, state: FSMContext):
 
 @profile_router.message(F.text == "✏️ Изменить фамилию")
 async def edit_last_name(message: Message, state: FSMContext):
-    await message.answer("Введите новую фамилию:")
+    await message.answer("Введите новую фамилию:") 
     await state.set_state(EditUserData.waiting_for_last_name)
 
 @profile_router.message(F.text == "📅 Изменить дату рождения")
@@ -105,7 +111,15 @@ async def edit_birth_date(message: Message, state: FSMContext):
 
 @profile_router.message(F.text == "📞 Изменить номер телефона")
 async def edit_phone(message: Message, state: FSMContext):
-    await message.answer("Введите новый номер телефона:")
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="Поделиться номером", request_contact=True)]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer(
+        "Введите ваш номер телефона или нажмите кнопку ниже:",
+        reply_markup=keyboard
+    )
     await state.set_state(EditUserData.waiting_for_phone)
 
 @profile_router.message(F.text == "📧 Изменить email")
@@ -115,30 +129,60 @@ async def edit_email(message: Message, state: FSMContext):
 
 @profile_router.message(EditUserData.waiting_for_first_name)
 async def process_first_name(message: Message, state: FSMContext):
+    if not name_pattern.fullmatch(message.text.strip()):
+        await message.answer("⚠️ Имя должно содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
+        return
+    
     await update_user_data(user_id=message.from_user.id, first_name=message.text, last_name=None, birth_date=None, phone_number=None, email=None)
     await message.answer("✅ Имя обновлено.")
     await state.clear()
 
 @profile_router.message(EditUserData.waiting_for_last_name)
 async def process_last_name(message: Message, state: FSMContext):
+    if not name_pattern.fullmatch(message.text.strip()):
+        await message.answer("⚠️ Фамилия должна содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
+        return
+
     await update_user_data(user_id=message.from_user.id, first_name=None, last_name=message.text, birth_date=None, phone_number=None, email=None)
     await message.answer("✅ Фамилия обновлена.")
     await state.clear()
 
 @profile_router.message(EditUserData.waiting_for_birth_date)
 async def process_birth_date(message: Message, state: FSMContext):
-    await update_user_data(user_id=message.from_user.id, first_name=None, last_name=None, birth_date=message.text, phone_number=None, email=None)
+    try:
+        birth_date_obj = datetime.strptime(message.text, "%d.%m.%Y")
+        birth_date_iso = birth_date_obj.date().isoformat()
+    except ValueError:
+        await message.answer("⚠️ Неверный формат. Попробуйте снова (ДД.ММ.ГГГГ):")
+        return
+    
+    await update_user_data(user_id=message.from_user.id, first_name=None, last_name=None, birth_date=birth_date_iso, phone_number=None, email=None)
     await message.answer("✅ Дата рождения обновлена.")
     await state.clear()
 
 @profile_router.message(EditUserData.waiting_for_phone)
 async def process_phone(message: Message, state: FSMContext):
+    if message.contact:
+        phone = message.contact.phone_number
+    else:
+        phone = message.text.strip().replace(" ", "")
+    if not phone_pattern.fullmatch(phone):
+        await message.answer(
+            "⚠️ Введите корректный номер телефона (10–15 цифр, можно с '+'). Пример: +79001234567",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+    
     await update_user_data(user_id=message.from_user.id, first_name=None, last_name=None, birth_date=None, phone_number=message.text, email=None)
-    await message.answer("✅ Номер телефона обновлён.")
+    await message.answer("✅ Номер телефона обновлён.", reply_markup=edit_data_keyboard)
     await state.clear()
 
 @profile_router.message(EditUserData.waiting_for_email)
 async def process_email(message: Message, state: FSMContext):
+    if not email_pattern.fullmatch(message.text.strip()):
+        await message.answer("⚠️ Неверный формат email. Попробуйте снова:")
+        return
+    
     await update_user_data(user_id=message.from_user.id, first_name=None, last_name=None, birth_date=None, phone_number=None, email=message.text)
     await message.answer("✅ Email обновлён.")
     await state.clear()
