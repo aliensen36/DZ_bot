@@ -26,3 +26,4 @@ async def get_profile_inline_kb() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
+

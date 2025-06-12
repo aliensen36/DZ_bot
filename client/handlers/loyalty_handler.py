@@ -10,7 +10,9 @@ import aiohttp
 
 from client.keyboards.reply import main_kb
 from data.config import config_settings
-from data.url import url_loyalty, url_users
+from data.url import url_loyalty
+from client.services.loyalty import fetch_loyalty_card
+from client.services.user import update_user_data
 
 # Регулярные выражения для валидации
 name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
@@ -29,76 +31,7 @@ class LoyaltyCardForm(StatesGroup):
     phone_number = State()
     email = State()
 
-# Запрос карты
-async def fetch_loyalty_card(user_id: int):
-    """Получает данные карты лояльности пользователя по его ID.
 
-    Args:
-        user_id (int): ID пользователя в Telegram.
-
-    Returns:
-        dict: Данные карты или None, если карта не найдена.
-
-    Raises:
-        RuntimeError: Если произошла ошибка при запросе.
-    """
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    logger.info(f"Fetching loyalty card for user_id={user_id}")
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.get(f"{url_loyalty}{user_id}/", headers=headers) as resp:
-                if resp.status == 200:
-                    card_data = await resp.json()
-                    logger.info(f"Loyalty card fetched for user_id={user_id}")
-                    return card_data
-                elif resp.status == 404:
-                    logger.info(f"No loyalty card found for user_id={user_id}")
-                    return None
-                else:
-                    text = await resp.text()
-                    logger.error(f"Failed to fetch loyalty card for user_id={user_id}: status={resp.status}, response={text}")
-                    return None
-    except Exception as e:
-        logger.exception(f"Exception while fetching loyalty card for user_id={user_id}: {str(e)}")
-        return None
-
-# Обновление данных юзера
-async def update_user_data(user_id: int, first_name: str, last_name: str, birth_date: str, phone_number: str,
-                           email: str):
-    """
-    Обновление данных пользователя для карты лояльности
-    """
-    payload = {
-        "user_first_name": first_name,
-        "user_last_name": last_name,
-        "birth_date": birth_date,
-        "phone_number": phone_number,
-        "email": email
-    }
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    url = f"{url_users.rstrip('/')}/{user_id}/"
-    logger.info(f"Updating user data for user_id={user_id} with payload={payload}, url={url}")
-
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.patch(url, json=payload, headers=headers) as resp:
-                response_text = await resp.text()
-                if resp.status in [200, 201]:
-                    logger.info(f"User data updated for user_id={user_id}, status={resp.status}")
-                    return True
-                else:
-                    logger.error(
-                        f"Failed to update user data for user_id={user_id}: status={resp.status}, response={response_text}")
-                    return False
-    except aiohttp.ClientError as e:
-        logger.exception(f"Client error while updating user data for user_id={user_id}: {str(e)}")
-        return False
-    except Exception as e:
-        logger.exception(f"Unexpected error while updating user data for user_id={user_id}: {str(e)}")
-        return False
-
-
-# Создание карты
 async def create_loyalty_card(user_id: int):
     """
     Создание карты лояльности
@@ -132,7 +65,7 @@ async def create_loyalty_card(user_id: int):
         logger.exception(f"Exception while creating loyalty card for user_id={user_id}: {str(e)}")
         raise RuntimeError(f"Произошла ошибка при создании карты: {str(e)}")
 
-# Запуск процесса
+
 @loyalty_router.message(F.text == "💳 Карта лояльности")
 async def handle_loyalty_request(message: Message, state: FSMContext):
     """Обрабатывает запрос карты лояльности и запускает FSM при необходимости.
@@ -195,6 +128,7 @@ async def collect_last_name(message: Message, state: FSMContext):
     await state.set_state(LoyaltyCardForm.first_name)
     await message.answer("Введите ваше имя:")
 
+
 @loyalty_router.message(LoyaltyCardForm.first_name)
 async def collect_first_name(message: Message, state: FSMContext):
     """Собирает имя пользователя для создания карты.
@@ -212,6 +146,7 @@ async def collect_first_name(message: Message, state: FSMContext):
     await state.update_data(first_name=message.text.strip())
     await state.set_state(LoyaltyCardForm.birth_date)
     await message.answer("Введите дату рождения (в формате ДД.ММ.ГГГГ):")
+
 
 @loyalty_router.message(LoyaltyCardForm.birth_date)
 async def collect_birth_date(message: Message, state: FSMContext):
@@ -242,6 +177,7 @@ async def collect_birth_date(message: Message, state: FSMContext):
         reply_markup=keyboard
     )
 
+
 @loyalty_router.message(LoyaltyCardForm.phone_number)
 async def collect_phone_number(message: Message, state: FSMContext):
     """Собирает номер телефона пользователя для создания карты.
@@ -269,6 +205,7 @@ async def collect_phone_number(message: Message, state: FSMContext):
         "Введите ваш email:",
         reply_markup=ReplyKeyboardRemove()
     )
+
 
 @loyalty_router.message(LoyaltyCardForm.email)
 async def collect_email_and_create(message: Message, state: FSMContext):
