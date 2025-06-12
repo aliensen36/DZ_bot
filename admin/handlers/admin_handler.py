@@ -29,8 +29,13 @@ admin_router.message.filter(
 
 
 async def generate_excel_report():
-    """
-    Генерация отчета в Excel с данными всех пользователей, включая данные карты лояльности, если они заполнены
+    """Генерирует отчёт в формате Excel с данными пользователей.
+
+    Returns:
+        BytesIO: Объект с Excel-файлом или None, если данные отсутствуют.
+
+    Raises:
+        Exception: Если произошла ошибка при запросе API или создании файла.
     """
     if not config_settings.BOT_API_KEY:
         logger.error("BOT_API_KEY не установлен")
@@ -158,6 +163,15 @@ async def generate_excel_report():
 
 @admin_router.message(Command("admin"))
 async def admin_panel(message: Message, bot: Bot):
+    """Открывает админ-панель для пользователя.
+
+    Args:
+        message (Message): Сообщение от пользователя с командой /admin.
+        bot (Bot): Объект бота для отправки ответа.
+
+    Notes:
+        Доступно только администраторам через фильтры.
+    """
     user_id = message.from_user.id
     await message.answer(
         "🛠 Админ-панель",
@@ -166,6 +180,14 @@ async def admin_panel(message: Message, bot: Bot):
 
 @admin_router.message(F.text == "📊 Статистика")
 async def show_statistics(message: Message):
+    """Отображает статистику пользователей и предлагает выгрузку в Excel.
+
+    Args:
+        message (Message): Сообщение от пользователя с запросом статистики.
+
+    Notes:
+        Выполняет запрос к API и строит инлайн-клавиатуру с кнопкой выгрузки.
+    """
     try:
         # Проверка соединения с сервером
         try:
@@ -241,6 +263,14 @@ async def show_statistics(message: Message):
 
 @admin_router.callback_query(F.data == "export_users_excel")
 async def export_users_excel(callback: CallbackQuery):
+    """Генерирует и отправляет отчёт пользователей в формате Excel.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Выгрузить в Excel".
+
+    Notes:
+        Использует generate_excel_report для создания файла.
+    """
     try:
         await callback.answer("⏳ Готовим отчет...")
         excel_file = await generate_excel_report()
@@ -263,6 +293,14 @@ async def export_users_excel(callback: CallbackQuery):
 
 @admin_router.message(F.text == "🚪 Выход")
 async def exit_admin_panel(message: Message):
+    """Выходит из админ-панели и возвращает основное меню.
+
+    Args:
+        message (Message): Сообщение от пользователя с запросом выхода.
+
+    Notes:
+        Устанавливает основную клавиатуру main_kb.
+    """
     await message.answer(
         "Выход из админ-панели",
         reply_markup=main_kb

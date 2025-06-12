@@ -31,6 +31,17 @@ class LoyaltyCardForm(StatesGroup):
 
 # Запрос карты
 async def fetch_loyalty_card(user_id: int):
+    """Получает данные карты лояльности пользователя по его ID.
+
+    Args:
+        user_id (int): ID пользователя в Telegram.
+
+    Returns:
+        dict: Данные карты или None, если карта не найдена.
+
+    Raises:
+        RuntimeError: Если произошла ошибка при запросе.
+    """
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
     logger.info(f"Fetching loyalty card for user_id={user_id}")
     try:
@@ -124,6 +135,15 @@ async def create_loyalty_card(user_id: int):
 # Запуск процесса
 @loyalty_router.message(F.text == "💳 Карта лояльности")
 async def handle_loyalty_request(message: Message, state: FSMContext):
+    """Обрабатывает запрос карты лояльности и запускает FSM при необходимости.
+
+    Args:
+        message (Message): Сообщение с запросом карты.
+        state (FSMContext): Контекст состояния FSM для управления процессом.
+
+    Notes:
+        Проверяет наличие карты и запрашивает данные, если её нет.
+    """
     user_id = message.from_user.id
     await state.clear()
     try:
@@ -159,6 +179,15 @@ async def handle_loyalty_request(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.last_name)
 async def collect_last_name(message: Message, state: FSMContext):
+    """Собирает фамилию пользователя для создания карты.
+
+    Args:
+        message (Message): Сообщение с фамилией.
+        state (FSMContext): Контекст состояния FSM для сохранения данных.
+
+    Notes:
+        Проверяет формат фамилии и переключает состояние на first_name.
+    """
     if not name_pattern.fullmatch(message.text.strip()):
         await message.answer("⚠️ Фамилия должна содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
         return
@@ -168,6 +197,15 @@ async def collect_last_name(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.first_name)
 async def collect_first_name(message: Message, state: FSMContext):
+    """Собирает имя пользователя для создания карты.
+
+    Args:
+        message (Message): Сообщение с именем.
+        state (FSMContext): Контекст состояния FSM для сохранения данных.
+
+    Notes:
+        Проверяет формат имени и переключает состояние на birth_date.
+    """
     if not name_pattern.fullmatch(message.text.strip()):
         await message.answer("⚠️ Имя должно содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
         return
@@ -177,6 +215,15 @@ async def collect_first_name(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.birth_date)
 async def collect_birth_date(message: Message, state: FSMContext):
+    """Собирает дату рождения пользователя для создания карты.
+
+    Args:
+        message (Message): Сообщение с датой рождения.
+        state (FSMContext): Контекст состояния FSM для сохранения данных.
+
+    Notes:
+        Проверяет формат (ДД.ММ.ГГГГ) и переключает состояние на phone_number.
+    """
     try:
         birth_date_obj = datetime.strptime(message.text, "%d.%m.%Y")
         birth_date_iso = birth_date_obj.date().isoformat()
@@ -197,6 +244,15 @@ async def collect_birth_date(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.phone_number)
 async def collect_phone_number(message: Message, state: FSMContext):
+    """Собирает номер телефона пользователя для создания карты.
+
+    Args:
+        message (Message): Сообщение с номером телефона или контактом.
+        state (FSMContext): Контекст состояния FSM для сохранения данных.
+
+    Notes:
+        Поддерживает ввод вручную или через кнопку "Поделиться номером".
+    """
     if message.contact:
         phone = message.contact.phone_number
     else:
@@ -216,6 +272,15 @@ async def collect_phone_number(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.email)
 async def collect_email_and_create(message: Message, state: FSMContext):
+    """Собирает email и создаёт карту лояльности.
+
+    Args:
+        message (Message): Сообщение с email.
+        state (FSMContext): Контекст состояния FSM для получения данных.
+
+    Notes:
+        Выполняет обновление данных пользователя и создание карты через API.
+    """
     if not email_pattern.fullmatch(message.text.strip()):
         await message.answer("⚠️ Неверный формат email. Попробуйте снова:")
         return

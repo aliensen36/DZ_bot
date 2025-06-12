@@ -16,6 +16,14 @@ start_router = Router()
 
 @start_router.message(CommandStart())
 async def cmd_start(message: Message):
+    """Обрабатывает команду /start для регистрации или приветствия пользователя.
+
+    Args:
+        message (Message): Сообщение с командой /start.
+
+    Notes:
+        Выполняет POST-запрос к API для регистрации и отправляет приветствие в зависимости от статуса (200 или 201).
+    """
     user_data = {
         "tg_id": message.from_user.id,
         "first_name": message.from_user.first_name or "",

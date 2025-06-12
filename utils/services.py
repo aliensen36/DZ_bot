@@ -13,7 +13,14 @@ from utils.filters import ADMIN_CHAT_ID
 MESSAGE_ID_FILE = Path("utils/last_message_id.json")
 
 def load_last_message_id() -> int | None:
-    """Загружает ID последнего сообщения из файла"""
+    """Загружает ID последнего сообщения из файла.
+
+    Returns:
+        int | None: ID последнего сообщения или None, если файл отсутствует или произошла ошибка.
+
+    Raises:
+        Exception: Если произошла ошибка чтения файла.
+    """
     try:
         if MESSAGE_ID_FILE.exists():
             with open(MESSAGE_ID_FILE, "r") as f:
@@ -24,7 +31,14 @@ def load_last_message_id() -> int | None:
     return None
 
 def save_last_message_id(message_id: int):
-    """Сохраняет ID сообщения в файл"""
+    """Сохраняет ID сообщения в файл.
+
+    Args:
+        message_id (int): ID сообщения для сохранения.
+
+    Raises:
+        Exception: Если произошла ошибка записи в файл.
+    """
     try:
         with open(MESSAGE_ID_FILE, "w") as f:
             json.dump({"message_id": message_id}, f)

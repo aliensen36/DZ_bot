@@ -23,14 +23,30 @@ admin_mailing_router.message.filter(
 
 @admin_mailing_router.message(F.text == "📢 Рассылка")
 async def start_mailing(message: Message, state: FSMContext):
-    """Начало рассылки"""
+    """Инициирует процесс создания рассылки.
+
+    Args:
+        message (Message): Сообщение от пользователя, инициирующее рассылку.
+        state (FSMContext): Контекст состояния FSM для управления процессом.
+
+    Notes:
+        Устанавливает состояние MailingFSM.text и удаляет текущую клавиатуру.
+    """
     await message.answer("Введите текст рассылки:", reply_markup=ReplyKeyboardRemove())
     await state.set_state(MailingFSM.text)
     
 
 @admin_mailing_router.message(MailingFSM.text)
 async def get_text_mailing(message: Message, state: FSMContext):
-    """Получение текста рассылки"""
+    """Обрабатывает введённый текст рассылки.
+
+    Args:
+        message (Message): Сообщение с текстом рассылки.
+        state (FSMContext): Контекст состояния FSM для сохранения данных.
+
+    Notes:
+        Сохраняет текст, проверяет длину (максимум 1024 символа) и предлагает опции для продолжения.
+    """
     await state.update_data(text=message.text)
     if len(message.text) > 1024:
         await message.answer("Текст записан!\nВы можете выбрать опции для отправки рассылки:\nКартинки не доступны, тк длина текста превышает 1024 символа",
@@ -48,7 +64,15 @@ async def get_text_mailing(message: Message, state: FSMContext):
 
 @admin_mailing_router.callback_query(F.data == "change_text_mailing")
 async def change_text_mailing(callback: CallbackQuery, state: FSMContext):
-    """Изменение текста рассылки"""
+    """Позволяет изменить текст рассылки.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Изменить текст".
+        state (FSMContext): Контекст состояния FSM для сброса на состояние текста.
+
+    Notes:
+        Устанавливает состояние MailingFSM.text и удаляет текущую клавиатуру.
+    """
     await callback.message.answer("Введите новый текст рассылки:",
                                   reply_markup=ReplyKeyboardRemove())
     await state.set_state(MailingFSM.text)
@@ -58,7 +82,15 @@ async def change_text_mailing(callback: CallbackQuery, state: FSMContext):
 
 @admin_mailing_router.callback_query(F.data == "mailing_add_image")
 async def add_image_mailing(callback: CallbackQuery, state: FSMContext):
-    """Добавление картинки к рассылке"""
+    """Запрашивает изображение для рассылки.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Добавить картинку".
+        state (FSMContext): Контекст состояния FSM для перехода к состоянию изображения.
+
+    Notes:
+        Устанавливает состояние MailingFSM.image.
+    """
     await callback.message.answer("Отправьте картинку для рассылки:")
     await state.set_state(MailingFSM.image)
     await callback.answer()
@@ -67,7 +99,15 @@ async def add_image_mailing(callback: CallbackQuery, state: FSMContext):
 
 @admin_mailing_router.message(MailingFSM.image)
 async def get_image_mailing(message: Message, state: FSMContext):
-    """Получение картинки для рассылки"""
+    """Сохраняет отправленное изображение для рассылки.
+
+    Args:
+        message (Message): Сообщение с изображением.
+        state (FSMContext): Контекст состояния FSM для сохранения file_id.
+
+    Notes:
+        Сохраняет file_id последнего фото и переключает состояние на MailingFSM.wait.
+    """
     if message.photo:
         await state.update_data(image=message.photo[-1].file_id)
         await message.answer("Картинка добавлена!\nВы можете выбрать опции для отправки рассылки:",
@@ -80,7 +120,15 @@ async def get_image_mailing(message: Message, state: FSMContext):
 
 @admin_mailing_router.callback_query(F.data == "mailing_add_button_url")
 async def add_button_url_mailing(callback: CallbackQuery, state: FSMContext):
-    """Добавление ссылки для кнопки к рассылке"""
+    """Запрашивает ссылку для кнопки в рассылке.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Добавить ссылку".
+        state (FSMContext): Контекст состояния FSM для перехода к состоянию ссылки.
+
+    Notes:
+        Устанавливает состояние MailingFSM.button_url.
+    """
     await callback.message.answer("Отправьте ссылку для кнопки:")
     await state.set_state(MailingFSM.button_url)
     await callback.answer()
@@ -88,7 +136,15 @@ async def add_button_url_mailing(callback: CallbackQuery, state: FSMContext):
 
 @admin_mailing_router.message(MailingFSM.button_url)
 async def get_button_url_mailing(message: Message, state: FSMContext):
-    """Получение ссылки для кнопки к рассылке"""
+    """Проверяет и сохраняет ссылку для кнопки рассылки.
+
+    Args:
+        message (Message): Сообщение с текстом ссылки.
+        state (FSMContext): Контекст состояния FSM для сохранения URL.
+
+    Notes:
+        Проверяет формат URL (начинается с https://) и переключает состояние на MailingFSM.wait.
+    """
     link = message.text.split('/')
     if len(link) > 1 and link[0] == "https:" and link[1] == "":
         await state.update_data(button_url=message.text)
@@ -102,7 +158,15 @@ async def get_button_url_mailing(message: Message, state: FSMContext):
 
 @admin_mailing_router.callback_query(F.data == "send_mailing")
 async def sending_mailing(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение отправки рассылки"""
+    """Подготавливает предварительный просмотр рассылки перед отправкой.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Отправить рассылку".
+        state (FSMContext): Контекст состояния FSM для получения данных.
+
+    Notes:
+        Отображает текст, изображение и/или кнопку с ссылкой для подтверждения.
+    """
     data = await state.get_data()
     text = data.get("text")
     image = data.get("image")
@@ -126,7 +190,18 @@ async def sending_mailing(callback: CallbackQuery, state: FSMContext):
 
 
 async def download_image(callback: CallbackQuery, image_id: str) -> str:
-    """Скачивание картинки"""
+    """Скачивает изображение с сервера Telegram и сохраняет на диск.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос для доступа к боту.
+        image_id (str): ID изображения для скачивания.
+
+    Returns:
+        str: Путь к сохранённому файлу.
+
+    Raises:
+        Exception: Если произошла ошибка при скачивании или сохранении.
+    """
     bot = callback.bot
     file = await bot.get_file(image_id)
     file_data = await bot.download_file(file.file_path)
@@ -145,7 +220,15 @@ async def download_image(callback: CallbackQuery, image_id: str) -> str:
 
 @admin_mailing_router.callback_query(F.data == "accept_send_mailing")
 async def send_mailing(callback: CallbackQuery, state: FSMContext):
-    """Отправка рассылки всем пользователям через API бэкенда"""
+    """Отправляет рассылку всем пользователям через API.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Подтвердить".
+        state (FSMContext): Контекст состояния FSM для получения данных.
+
+    Notes:
+        Использует API для получения списка пользователей и отправки сообщений с ограничением скорости.
+    """
     data = await state.get_data()
     text = data.get("text")
     image_id = data.get("image")
@@ -299,7 +382,15 @@ async def send_mailing(callback: CallbackQuery, state: FSMContext):
 
 @admin_mailing_router.callback_query(F.data == "cancel_send_mailing")
 async def cancel_send_mailing(callback: CallbackQuery, state: FSMContext):
-    """Отмена рассылки"""
+    """Отменяет процесс создания рассылки.
+
+    Args:
+        callback (CallbackQuery): Callback-запрос от кнопки "Отменить".
+        state (FSMContext): Контекст состояния FSM для очистки.
+
+    Notes:
+        Возвращает админ-клавиатуру после отмены.
+    """
     await callback.message.answer("Рассылка отменена!",
                                   reply_markup=admin_keyboard())
     await callback.answer()

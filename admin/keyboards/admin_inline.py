@@ -2,7 +2,17 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardMarkup
 from aiogram.types import InlineKeyboardButton
 
 async def mailing_keyboard(message_size: int) -> InlineKeyboardBuilder:
-    """Создание инлайн-клавиатуры для рассылки"""
+    """Создаёт инлайн-клавиатуру для управления рассылкой.
+
+    Args:
+        message_size (int): Размер текста рассылки в символах.
+
+    Returns:
+        InlineKeyboardMarkup: Клавиатура с кнопками для добавления картинки, ссылки, отмены, изменения текста и отправки.
+
+    Notes:
+        Кнопка "Добавить картинку" доступна только если message_size <= 1024.
+    """
     keyboard = InlineKeyboardBuilder()
     
     if message_size <= 1024:
@@ -25,7 +35,14 @@ async def mailing_keyboard(message_size: int) -> InlineKeyboardBuilder:
     return keyboard.as_markup()
 
 async def admin_link_keyboard(link: str) -> InlineKeyboardBuilder:
-    """Создание инлайн-клавиатуры для админов"""
+    """Создаёт инлайн-клавиатуру с кнопкой для перехода по ссылке.
+
+    Args:
+        link (str): URL для кнопки "Перейти".
+
+    Returns:
+        InlineKeyboardMarkup: Клавиатура с одной кнопкой "Перейти".
+    """
     keyboard = InlineKeyboardBuilder()
     keyboard.add( InlineKeyboardButton(text="Перейти", url=link))
     return keyboard.as_markup()
