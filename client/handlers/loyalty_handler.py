@@ -17,7 +17,6 @@ from client.services.user import update_user_data
 # Регулярные выражения для валидации
 name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
 email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
-phone_pattern = re.compile(r"^\+?\d{10,15}$")
 
 logger = logging.getLogger(__name__)
 
@@ -180,26 +179,44 @@ async def collect_birth_date(message: Message, state: FSMContext):
 
 @loyalty_router.message(LoyaltyCardForm.phone_number)
 async def collect_phone_number(message: Message, state: FSMContext):
-    """Собирает номер телефона пользователя для создания карты.
+    """
+    Собирает номер телефона пользователя для создания карты.
 
-    Args:
-        message (Message): Сообщение с номером телефона или контактом.
-        state (FSMContext): Контекст состояния FSM для сохранения данных.
-
-    Notes:
-        Поддерживает ввод вручную или через кнопку "Поделиться номером".
+    Поддерживает ввод вручную или через кнопку "Поделиться номером".
+    Выполняет нормализацию и строгую валидацию.
     """
     if message.contact:
         phone = message.contact.phone_number
     else:
-        phone = message.text.strip().replace(" ", "")
-    if not phone_pattern.fullmatch(phone):
+        phone = message.text.strip()
+
+    # Удаляем пробелы, тире, скобки и прочие символы кроме цифр и плюса
+    phone = re.sub(r"[^\d+]", "", phone)
+
+    # Если начинается с 8, заменим на +7 (российская стандартизация)
+    if phone.startswith("8") and len(phone) == 11:
+        normalized = "+7" + phone[1:]
+    elif phone.startswith("7") and len(phone) == 11:
+        normalized = "+7" + phone[1:]
+    elif phone.startswith("+") and 11 <= len(re.sub(r"\D", "", phone)) <= 15:
+        normalized = phone
+    else:
+        # Невалидный формат
         await message.answer(
-            "⚠️ Введите корректный номер телефона (10–15 цифр, можно с '+'). Пример: +79001234567",
+            "⚠️ Введите корректный номер телефона с кодом страны, например: +79001234567",
             reply_markup=ReplyKeyboardRemove()
         )
         return
-    await state.update_data(phone_number=phone)
+
+    # Финальная проверка на формат
+    if not re.fullmatch(r"^\+\d{11,15}$", normalized):
+        await message.answer(
+            "⚠️ Номер должен начинаться с + и содержать от 11 до 15 цифр. Попробуйте снова.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        return
+
+    await state.update_data(phone_number=normalized)
     await state.set_state(LoyaltyCardForm.email)
     await message.answer(
         "Введите ваш email:",
