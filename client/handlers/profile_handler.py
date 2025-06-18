@@ -20,7 +20,6 @@ profile_router = Router()
 
 name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
 email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
-phone_pattern = re.compile(r"^\+?\d{10,15}$")
 
 class EditUserData(StatesGroup):
     choosing_field = State()
