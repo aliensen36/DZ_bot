@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 admin_mailing_router = Router()
 admin_mailing_router.message.filter(
     ChatTypeFilter("private"),
-    IsGroupAdmin(ADMIN_CHAT_ID, show_message=False)
+    IsGroupAdmin([ADMIN_CHAT_ID], show_message=False)
 )
 
 

@@ -6,6 +6,7 @@ load_dotenv()
 class Settings(BaseSettings):
     TOKEN: SecretStr
     ADMIN_CHAT_ID: int
+    RESIDENT_ADMIN_CHAT_ID: int
     base_url: str
     BOT_API_KEY: SecretStr
     APP_URL: str

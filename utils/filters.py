@@ -8,6 +8,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ADMIN_CHAT_ID = os.getenv("ADMIN_CHAT_ID")
+RESIDENT_ADMIN_CHAT_ID = os.getenv("RESIDENT_ADMIN_CHAT_ID")
+
 
 class ChatTypeFilter(BaseFilter):
     def __init__(self, chat_types: Union[str, list[str]]):
@@ -26,31 +28,20 @@ class ChatTypeFilter(BaseFilter):
 
 
 class IsGroupAdmin(BaseFilter):
-    def __init__(self, admin_chat_id: int, show_message: bool = True):
-        self.admin_chat_id = admin_chat_id
-        self.show_message = show_message  # Флаг для отображения сообщения
+    def __init__(self, admin_chat_ids: list[int], show_message: bool = True):
+        self.admin_chat_ids = admin_chat_ids
+        self.show_message = show_message
 
     async def __call__(self, message: Message, bot: Bot) -> bool:
-        """Проверяет, является ли пользователь администратором группы.
-
-        Args:
-            message (Message): Сообщение от пользователя.
-            bot (Bot): Объект бота для проверки прав.
-
-        Returns:
-            bool: True, если пользователь администратор, иначе False.
-
-        Notes:
-            Отправляет уведомление об ошибке, если show_message=True.
-        """
         if message.chat.type == "private":
             try:
-                member = await bot.get_chat_member(self.admin_chat_id, message.from_user.id)
-                if member.status not in ["creator", "administrator"]:
-                    if self.show_message:  # Показываем сообщение только если флаг True
-                        await message.answer("🚫 Доступ только для админов!")
-                    return False
-                return True
+                for chat_id in self.admin_chat_ids:
+                    member = await bot.get_chat_member(chat_id, message.from_user.id)
+                    if member.status in ["creator", "administrator"]:
+                        return True
+                if self.show_message:
+                    await message.answer("🚫 Доступ только для админов!")
+                return False
             except Exception as e:
                 if self.show_message:
                     await message.answer("⚠️ Ошибка проверки прав доступа")

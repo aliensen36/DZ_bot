@@ -15,6 +15,7 @@ from cmds.bot_cmds_list import bot_cmds_list
 from client.handlers.profile_handler import profile_router
 from client.handlers.start_handler import start_router
 from client.handlers.loyalty_handler import loyalty_router
+from resident_admin.handlers.res_admin_handler import res_admin_router
 
 from utils.services import notify_restart
 from dotenv import load_dotenv
@@ -32,11 +33,6 @@ bot = Bot(token=config_settings.TOKEN.get_secret_value(),
 async def startup(dispatcher: Dispatcher):
     logger.info("Starting bot...")
     await notify_restart(bot, "работает")
-    # try:
-    #     await init_db()
-    # except Exception as e:
-    #     logger.error(f"Database error: {e}")
-    #     raise
 
 
 async def shutdown(dispatcher: Dispatcher):
@@ -48,11 +44,15 @@ async def shutdown(dispatcher: Dispatcher):
 def setup_routers(dp: Dispatcher) -> None:
     """Регистрация всех роутеров"""
     routers = (
+        # Клиентские роутеры
         start_router,
         profile_router,
         loyalty_router,
+        # Админские роутеры
         admin_router,
         admin_mailing_router,
+        # Резидентские роуетры
+        res_admin_router
     )
     for router in routers:
         dp.include_router(router)
