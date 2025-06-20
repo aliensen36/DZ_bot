@@ -8,7 +8,8 @@ from admin.keyboards.admin_inline import mailing_keyboard, admin_link_keyboard, 
 from admin.keyboards.admin_reply import admin_keyboard
 from data.url import *
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
-from utils.fsm_states import MailingFSM
+from email.mime import image
+from aiogram.fsm.state import State, StatesGroup
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,23 @@ admin_mailing_router.message.filter(
     ChatTypeFilter("private"),
     IsGroupAdmin([ADMIN_CHAT_ID], show_message=False)
 )
+
+
+
+
+class MailingFSM(StatesGroup):
+    """Состояния FSM для процесса создания рассылки.
+
+    States:
+        text: Состояние ввода текста рассылки.
+        image: Состояние добавления изображения.
+        button_url: Состояние добавления ссылки для кнопки.
+        wait: Состояние ожидания подтверждения.
+    """
+    text = State()
+    image = State()
+    button_url = State()
+    wait = State()
 
 
 @admin_mailing_router.message(F.text == "📢 Рассылка")

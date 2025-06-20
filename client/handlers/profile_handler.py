@@ -55,6 +55,7 @@ async def handle_profile(message: Message):
 @profile_router.callback_query(F.data == "my_data")
 async def my_data_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
+    await callback.answer()
 
     card =  await fetch_loyalty_card(user_id)
 
@@ -82,6 +83,7 @@ async def my_data_handler(callback: CallbackQuery):
             logging.debug(f"Ignored 'message not modified' for user {callback.from_user.id}")
         else:
             logging.error(f"TelegramBadRequest: {e}")
+            await callback.answer()
             raise
 
 @profile_router.message(F.text == "✏️ Изменить данные")
