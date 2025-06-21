@@ -249,7 +249,7 @@ async def my_bonuses_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
     await callback.answer()
 
-    url = f"{url_loyalty}balance/"
+    url = f"{url_loyalty}balance/?tg_id={user_id}"
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
 
     try:
