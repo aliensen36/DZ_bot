@@ -1,5 +1,9 @@
+import aiohttp
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardMarkup
 from aiogram.types import InlineKeyboardButton
+from data.config import config_settings
+from data.url import url_resident
+
 
 async def mailing_keyboard(message_size: int) -> InlineKeyboardBuilder:
     """Создаёт инлайн-клавиатуру для управления рассылкой.
@@ -55,3 +59,53 @@ accept_mailing_kb = InlineKeyboardMarkup(
                               callback_data="cancel_send_mailing")],
     ]
 )
+
+
+async def fetch_resident_categories():
+    """
+    Получает список категорий резидентов из DRF API
+
+    Returns:
+        List[Tuple[str, str]]: Список категорий в формате [(value, label), ...]
+        None: В случае ошибки
+    """
+    url = f"{url_resident}categories/"
+    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get('categories')
+                else:
+                    response.raise_for_status()
+    except aiohttp.ClientError as e:
+        print(f"HTTP Client Error fetching categories: {e}")
+    except Exception as e:
+        print(f"Unexpected error fetching categories: {e}")
+    return None
+
+
+# Клавиатура для выбора категории резидента
+async def get_categories_keyboard():
+    categories = await fetch_resident_categories()
+    if not categories:
+        # Fallback на случай, если API недоступно
+        categories = [
+            ("services", "Услуги и развлечения"),
+            ("retail", "Ритейл"),
+            ("gastro", "Гастро")
+        ]
+
+    builder = InlineKeyboardBuilder()
+    for category in categories:
+        # Обрабатываем разные возможные форматы ответа
+        if isinstance(category, dict):  # Если API возвращает {'value':..., 'label':...}
+            builder.button(text=category['label'], callback_data=f"category_{category['value']}")
+        else:  # Если API возвращает кортежи (value, label)
+            builder.button(text=category[1], callback_data=f"category_{category[0]}")
+
+    builder.adjust(1)
+    return builder.as_markup()
+

@@ -4,6 +4,8 @@ import os
 import sys
 
 from aiogram import Bot, Dispatcher, types
+
+from admin.handlers.resident_handler import admin_resident_router
 from data.config import config_settings
 
 from aiogram.client.default import DefaultBotProperties
@@ -51,6 +53,7 @@ def setup_routers(dp: Dispatcher) -> None:
         # Админские роутеры
         admin_router,
         admin_mailing_router,
+        admin_resident_router,
         # Резидентские роуетры
         res_admin_router
     )
