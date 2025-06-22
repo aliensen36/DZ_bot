@@ -2,7 +2,7 @@ import aiohttp
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardMarkup
 from aiogram.types import InlineKeyboardButton
 from data.config import config_settings
-from data.url import url_resident
+from data.url import url_resident, url_category
 
 
 async def mailing_keyboard(message_size: int) -> InlineKeyboardBuilder:
@@ -66,10 +66,10 @@ async def fetch_resident_categories():
     Получает список категорий резидентов из DRF API
 
     Returns:
-        List[Tuple[str, str]]: Список категорий в формате [(value, label), ...]
+        List[Tuple[str, str]]: Список категорий в формате [(value, name), ...]
         None: В случае ошибки
     """
-    url = f"{url_resident}categories/"
+    url = f"{url_category}"
     headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
 
     try:
@@ -77,7 +77,7 @@ async def fetch_resident_categories():
             async with session.get(url, headers=headers) as response:
                 if response.status == 200:
                     data = await response.json()
-                    return data.get('categories')
+                    return data
                 else:
                     response.raise_for_status()
     except aiohttp.ClientError as e:
@@ -91,12 +91,22 @@ async def fetch_resident_categories():
 async def get_categories_keyboard():
     categories = await fetch_resident_categories()
     builder = InlineKeyboardBuilder()
-    for category in categories:
-        # Обрабатываем разные возможные форматы ответа
-        if isinstance(category, dict):  # Если API возвращает {'value':..., 'label':...}
-            builder.button(text=category['label'], callback_data=f"category_{category['value']}")
-        else:  # Если API возвращает кортежи (value, label)
-            builder.button(text=category[1], callback_data=f"category_{category[0]}")
-    builder.adjust(1)
+    if categories is None or not isinstance(categories, list):
+        builder.button(text="Нет категорий", callback_data="no_categories")
+    else:
+        for category in categories:
+            try:
+                if isinstance(category, dict):
+                    # Используем 'id' вместо 'value'
+                    builder.button(
+                        text=category.get('name', 'Unknown'),
+                        callback_data=f"category_{category.get('id', 'unknown')}"
+                    )
+                else:
+                    # Поддержка кортежей (value, name)
+                    builder.button(text=category[1], callback_data=f"category_{category[0]}")
+            except (KeyError, IndexError) as e:
+                print(f"Error processing category {category}: {e}")
+                continue
+        builder.adjust(1)
     return builder.as_markup()
-

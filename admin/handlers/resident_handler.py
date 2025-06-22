@@ -22,6 +22,7 @@ admin_resident_router.message.filter(
 class ResidentForm(StatesGroup):
     waiting_for_name = State()
     waiting_for_category = State()
+    waiting_for_new_category = State()
     waiting_for_description = State()
     waiting_for_working_time = State()
     waiting_for_email = State()
