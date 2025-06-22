@@ -8,11 +8,14 @@ from aiogram.types import Message, CallbackQuery, ReplyKeyboardMarkup, KeyboardB
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram import F
+import aiohttp
 
 from client.keyboards.inline import get_profile_inline_kb
 from client.services.loyalty import fetch_loyalty_card
 from client.services.user import update_user_data
 from client.keyboards.reply import main_kb, edit_keyboard, edit_data_keyboard
+from data.config import config_settings
+from data.url import url_loyalty
 
 logger = logging.getLogger(__name__)
 
@@ -241,36 +244,46 @@ async def my_subscriptions_handler(callback: CallbackQuery):
     finally:
         await callback.answer()
 
-
-# Хендлер для кнопки "Мои бонусы"
 @profile_router.callback_query(F.data == "my_bonuses")
 async def my_bonuses_handler(callback: CallbackQuery):
-    """Отображает доступные бонусы пользователя.
+    user_id = callback.from_user.id
+    await callback.answer()
 
-    Args:
-        callback (CallbackQuery): Callback-запрос от кнопки "Мои бонусы".
+    url = f"{url_loyalty}balance/?tg_id={user_id}"
+    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
 
-    Notes:
-        Редактирует сообщение со списком бонусов.
-    """
     try:
-        user_data_message = (
-            "🎁 <b>Ваши бонусы</b>\n\n"
-            "☕ <b>15% скидка</b> на кофе в «Кофеин»\n"
-            "(действительна до 31.12.2025)\n\n"
-            "💪 <b>1 бесплатное посещение</b> фитнес-клуба «Жми»\n"
-            "(использовать до 15.11.2025)\n\n"
+        # Проверка наличия карты лояльности у пользователя
+        card = await fetch_loyalty_card(user_id)
+        if not card:
+            await callback.message.answer("⚠️ У вас нет активной карты лояльности.")
+            return
+
+        # Получаем баланс
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    balance = data.get("balance")
+                else:
+                    await callback.message.answer(
+                        "Произошла ошибка при получении баллов. Попробуйте позже или обратитесь в поддержку.",
+                        reply_markup=main_kb
+                    )
+                    return
+
+        if balance is None:
+            await callback.message.answer("Пока у Вас нет баллов.")
+            return
+
+        # Формируем сообщение с балансом
+        bonus_data_message = f"Активные бонусы: {balance}"
+
+        await callback.message.answer(
+            bonus_data_message,
+            reply_markup=main_kb,
         )
-        await callback.message.edit_text(
-            user_data_message,
-            reply_markup=await get_profile_inline_kb()
-        )
-        await callback.answer()
-    except TelegramBadRequest as e:
-        if "message is not modified" in str(e):
-            logging.debug(f"Ignored 'message not modified' for user {callback.from_user.id}")
-        else:
-            logging.error(f"TelegramBadRequest: {e}")
-            raise
-    finally:
-        await callback.answer()
+
+    except Exception as e:
+        logger.exception(f"Ошибка при получении баланса или карты для пользователя {user_id}: {e}")
+        await callback.message.answer("Произошла ошибка при получении информации о бонусах.")
