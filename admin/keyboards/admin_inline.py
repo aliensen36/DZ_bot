@@ -90,23 +90,24 @@ async def fetch_resident_categories():
 # Клавиатура для выбора категории резидента
 async def get_categories_keyboard():
     categories = await fetch_resident_categories()
+    print(f"Categories received: {categories}")  # Отладка
+    if categories is None or not isinstance(categories, list) or not categories:
+        print("No categories or invalid format")  # Отладка
+        return None  # Возвращаем None, если нет категорий
     builder = InlineKeyboardBuilder()
-    if categories is None or not isinstance(categories, list):
-        builder.button(text="Нет категорий", callback_data="no_categories")
-    else:
-        for category in categories:
-            try:
-                if isinstance(category, dict):
-                    # Используем 'id' вместо 'value'
-                    builder.button(
-                        text=category.get('name', 'Unknown'),
-                        callback_data=f"category_{category.get('id', 'unknown')}"
-                    )
-                else:
-                    # Поддержка кортежей (value, name)
-                    builder.button(text=category[1], callback_data=f"category_{category[0]}")
-            except (KeyError, IndexError) as e:
-                print(f"Error processing category {category}: {e}")
-                continue
-        builder.adjust(1)
-    return builder.as_markup()
+    for category in categories:
+        try:
+            if isinstance(category, dict):
+                builder.button(
+                    text=category.get('name', 'Unknown'),
+                    callback_data=f"category_{category.get('id', 'unknown')}"
+                )
+            else:
+                builder.button(text=category[1], callback_data=f"category_{category[0]}")
+        except (KeyError, IndexError) as e:
+            print(f"Error processing category {category}: {e}")
+            continue
+    builder.adjust(1)
+    markup = builder.as_markup()
+    print(f"Keyboard markup: {markup}")  # Отладка
+    return markup
