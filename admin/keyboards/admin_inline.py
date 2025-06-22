@@ -90,14 +90,6 @@ async def fetch_resident_categories():
 # Клавиатура для выбора категории резидента
 async def get_categories_keyboard():
     categories = await fetch_resident_categories()
-    if not categories:
-        # Fallback на случай, если API недоступно
-        categories = [
-            ("services", "Услуги и развлечения"),
-            ("retail", "Ритейл"),
-            ("gastro", "Гастро")
-        ]
-
     builder = InlineKeyboardBuilder()
     for category in categories:
         # Обрабатываем разные возможные форматы ответа
@@ -105,7 +97,6 @@ async def get_categories_keyboard():
             builder.button(text=category['label'], callback_data=f"category_{category['value']}")
         else:  # Если API возвращает кортежи (value, label)
             builder.button(text=category[1], callback_data=f"category_{category[0]}")
-
     builder.adjust(1)
     return builder.as_markup()
 

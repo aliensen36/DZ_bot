@@ -18,3 +18,14 @@ def admin_keyboard():
     builder.button(text="🚪 Выход")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
+
+
+# Клавиатура управления резидентами
+def residents_management_keyboard():
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="➕ Добавить резидента")
+    builder.button(text="✏️ Редактировать резидента")
+    builder.button(text="🗑️ Удалить резидента")
+    builder.button(text="◀️ Назад")
+    builder.adjust(2)
+    return builder.as_markup(resize_keyboard=True)

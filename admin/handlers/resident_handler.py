@@ -7,7 +7,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from admin.keyboards.admin_inline import get_categories_keyboard
 from data.config import config_settings
-from admin.keyboards.admin_reply import admin_keyboard
+from admin.keyboards.admin_reply import admin_keyboard, residents_management_keyboard
 from data.url import url_resident
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 
@@ -31,19 +31,6 @@ class ResidentForm(StatesGroup):
     waiting_for_floor = State()
     waiting_for_office = State()
     editing_resident = State()
-
-
-
-
-# Клавиатура управления резидентами
-def residents_management_keyboard():
-    builder = ReplyKeyboardBuilder()
-    builder.button(text="➕ Добавить резидента")
-    builder.button(text="✏️ Редактировать резидента")
-    builder.button(text="🗑️ Удалить резидента")
-    builder.button(text="◀️ Назад")
-    builder.adjust(1)
-    return builder.as_markup(resize_keyboard=True)
 
 
 # Хендлер кнопки "Резиденты"
