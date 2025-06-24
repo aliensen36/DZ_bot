@@ -6,5 +6,6 @@ url_mailing = f"{base_url}/mailings/"
 url_loyalty = f"{base_url}/loyalty-cards/"
 url_resident = f"{base_url}/residents/"
 url_category = f"{base_url}/categories/"
+url_point_transactions_acrue = f'{base_url}/points-transactions/accrue/'
 
 
