@@ -1,28 +1,28 @@
 import logging
-import re
-from datetime import datetime
 
 from aiogram import Router, F
-from aiogram.types import Message, BufferedInputFile, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram.types import (
+    Message, BufferedInputFile,
+    ReplyKeyboardMarkup, KeyboardButton,
+    CallbackQuery, ReplyKeyboardRemove
+)
+
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 import aiohttp
 
 from client.keyboards.reply import main_kb
-from data.config import config_settings
-from data.url import url_loyalty
-from client.services.loyalty import fetch_loyalty_card
+from client.services.loyalty import fetch_loyalty_card, create_loyalty_card
 from client.services.user import update_user_data
-
-# Регулярные выражения для валидации
-name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
-email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
+from client.keyboards.reply import cancel_keyboard
+from utils.validators import name_pattern, email_pattern
+from utils.client_utils import parse_birth_date, normalize_phone_number
 
 logger = logging.getLogger(__name__)
 
 loyalty_router = Router()
 
-# FSM состояния
+# FSM состояния для процесса регистрации карты лояльности
 class LoyaltyCardForm(StatesGroup):
     last_name = State()
     first_name = State()
@@ -31,77 +31,70 @@ class LoyaltyCardForm(StatesGroup):
     email = State()
 
 
-async def create_loyalty_card(user_id: int):
-    """
-    Создание карты лояльности
-    """
-    payload = {"user_id": user_id}
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    logger.info(f"Creating loyalty card for user_id={user_id}")
-
-    try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.post(
-                url=url_loyalty,
-                json=payload,
-                headers=headers
-            ) as resp:
-                text = await resp.text()
-                if resp.status == 201:
-                    card_data = await resp.json()
-                    logger.info(f"Loyalty card created for user_id={user_id}, status={resp.status}")
-                    return card_data
-                elif resp.status == 400:
-                    if "у вас уже есть карта" in text.lower():
-                        logger.info(f"Loyalty card already exists for user_id={user_id}")
-                        return None
-                    logger.warning(f"Failed to create loyalty card for user_id={user_id}: {text}")
-                    raise RuntimeError(f"Не удалось создать карту: {text}")
-                else:
-                    logger.error(f"Failed to create loyalty card for user_id={user_id}: status={resp.status}, response={text}")
-                    raise RuntimeError(f"Ошибка сервера ({resp.status}): {text}")
-    except Exception as e:
-        logger.exception(f"Exception while creating loyalty card for user_id={user_id}: {str(e)}")
-        raise RuntimeError(f"Произошла ошибка при создании карты: {str(e)}")
+# Обработчик команды "Отменить", возвращает в главное меню
+@loyalty_router.message(F.text == "Отменить")
+async def go_back_to_main_menu(message: Message):
+    await message.answer("Вы вернулись в главное меню", reply_markup=main_kb)
 
 
-@loyalty_router.message(F.text == "💳 Карта лояльности")
+# Запускает процесс регистрации карты лояльности при нажатии на кнопку.
+@loyalty_router.callback_query(F.data == "loyalty_register")
+async def start_loyalty_registration(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await handle_loyalty_request(callback.message, state)
+
+
+# Хэндлер для кнопки "Карта лояльности"
+@loyalty_router.message(F.text == "Карта лояльности")
 async def handle_loyalty_request(message: Message, state: FSMContext):
-    """Обрабатывает запрос карты лояльности и запускает FSM при необходимости.
-
-    Args:
-        message (Message): Сообщение с запросом карты.
-        state (FSMContext): Контекст состояния FSM для управления процессом.
-
-    Notes:
-        Проверяет наличие карты и запрашивает данные, если её нет.
     """
+    Обрабатывает запрос пользователя на получение карты лояльности.
+    Если у пользователя уже есть карта лояльности, отправляет изображение карты (если оно доступно).
+    В случае отсутствия изображения информирует пользователя об ошибке.
+    Если карта не найдена, инициирует процесс создания карты, запрашивая фамилию пользователя.
+    В случае возникновения ошибки сообщает пользователю и записывает исключение в лог.
+    Аргументы:
+        message (Message): Сообщение пользователя.
+        state (FSMContext): Контекст конечного автомата состояний для управления процессом ввода данных.
+    """
+    
     user_id = message.from_user.id
-    await state.clear()
+    await state.clear()  # Очистка состояния FSM, если процесс прервался
+
     try:
+        # Попытка получить карту лояльности
         card = await fetch_loyalty_card(user_id)
         if card:
+            # Если карта есть, пытаемся отправить изображение
             card_image_url = card.get("card_image")
             if card_image_url:
                 async with aiohttp.ClientSession() as session:
                     async with session.get(card_image_url) as img_resp:
                         if img_resp.status == 200:
-                            img_bytes = await img_resp.read()
+                            img_bytes = await img_resp.read()  # Загружаем изображение карты
                             image = BufferedInputFile(img_bytes, filename="loyalty_card.png")
                             logger.info(f"Sent loyalty card image for user_id={user_id}")
                             await message.answer_photo(photo=image, reply_markup=main_kb)
                             return
                         else:
                             logger.warning(f"Failed to fetch card image for user_id={user_id}, status={img_resp.status}")
+
             logger.warning(f"No card image available for user_id={user_id}")
+
+             # Если изображение недоступно
             await message.answer(
                 "Карта найдена, но изображение недоступно. Попробуйте позже или обратитесь в поддержку.",
                 reply_markup=main_kb
             )
             return
+        
         logger.info(f"Starting FSM for loyalty card creation for user_id={user_id}")
+        # Если карты нет, начинаем процесс создания
         await state.set_state(LoyaltyCardForm.last_name)
-        await message.answer("Введите вашу фамилию:", reply_markup=main_kb)
+        await message.answer(
+            "Введите вашу фамилию:",
+            reply_markup=cancel_keyboard
+        )
     except Exception as e:
         logger.exception(f"Error processing loyalty card request for user_id={user_id}: {str(e)}")
         await message.answer(
@@ -109,65 +102,51 @@ async def handle_loyalty_request(message: Message, state: FSMContext):
             reply_markup=main_kb
         )
 
+
+# Обрабатывает ввод фамилии пользователя, проверяет корректность и сохраняет в состояние FSM.
 @loyalty_router.message(LoyaltyCardForm.last_name)
 async def collect_last_name(message: Message, state: FSMContext):
-    """Собирает фамилию пользователя для создания карты.
-
-    Args:
-        message (Message): Сообщение с фамилией.
-        state (FSMContext): Контекст состояния FSM для сохранения данных.
-
-    Notes:
-        Проверяет формат фамилии и переключает состояние на first_name.
-    """
     if not name_pattern.fullmatch(message.text.strip()):
         await message.answer("⚠️ Фамилия должна содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
         return
     await state.update_data(last_name=message.text.strip())
     await state.set_state(LoyaltyCardForm.first_name)
-    await message.answer("Введите ваше имя:")
+    await message.answer(
+        "Введите ваше имя:",
+        reply_markup=cancel_keyboard
+    )
 
 
+# Обрабатывает ввод имени пользователя, проверяет корректность и сохраняет в состояние FSM.
 @loyalty_router.message(LoyaltyCardForm.first_name)
 async def collect_first_name(message: Message, state: FSMContext):
-    """Собирает имя пользователя для создания карты.
-
-    Args:
-        message (Message): Сообщение с именем.
-        state (FSMContext): Контекст состояния FSM для сохранения данных.
-
-    Notes:
-        Проверяет формат имени и переключает состояние на birth_date.
-    """
     if not name_pattern.fullmatch(message.text.strip()):
         await message.answer("⚠️ Имя должно содержать только буквы и быть не короче 2 символов. Попробуйте снова:")
         return
+    
     await state.update_data(first_name=message.text.strip())
     await state.set_state(LoyaltyCardForm.birth_date)
-    await message.answer("Введите дату рождения (в формате ДД.ММ.ГГГГ):")
+    await message.answer(
+        "Введите дату рождения (в формате ДД.ММ.ГГГГ):",
+        reply_markup=cancel_keyboard
+    )
 
 
+# Обрабатывает ввод даты рождения пользователя, проверяет корректность и сохраняет в состояние FSM.
 @loyalty_router.message(LoyaltyCardForm.birth_date)
 async def collect_birth_date(message: Message, state: FSMContext):
-    """Собирает дату рождения пользователя для создания карты.
-
-    Args:
-        message (Message): Сообщение с датой рождения.
-        state (FSMContext): Контекст состояния FSM для сохранения данных.
-
-    Notes:
-        Проверяет формат (ДД.ММ.ГГГГ) и переключает состояние на phone_number.
-    """
-    try:
-        birth_date_obj = datetime.strptime(message.text, "%d.%m.%Y")
-        birth_date_iso = birth_date_obj.date().isoformat()
-    except ValueError:
+    parsed_date = parse_birth_date(message.text)
+    if not parsed_date:
         await message.answer("⚠️ Неверный формат. Попробуйте снова (ДД.ММ.ГГГГ):")
         return
-    await state.update_data(birth_date=birth_date_iso)
+    
+    await state.update_data(birth_date=parsed_date)
     await state.set_state(LoyaltyCardForm.phone_number)
     keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="Поделиться номером", request_contact=True)]],
+        keyboard=[
+            [KeyboardButton(text="Поделиться номером", request_contact=True)],
+            [KeyboardButton(text="Отменить")]
+        ],
         resize_keyboard=True,
         one_time_keyboard=True
     )
@@ -177,73 +156,59 @@ async def collect_birth_date(message: Message, state: FSMContext):
     )
 
 
+# Обрабатывает ввод номера телефона пользователя, проверяет корректность и сохраняет в состояние FSM.
 @loyalty_router.message(LoyaltyCardForm.phone_number)
 async def collect_phone_number(message: Message, state: FSMContext):
-    """
-    Собирает номер телефона пользователя для создания карты.
-
-    Поддерживает ввод вручную или через кнопку "Поделиться номером".
-    Выполняет нормализацию и строгую валидацию.
-    """
     if message.contact:
         phone = message.contact.phone_number
     else:
         phone = message.text.strip()
 
-    # Удаляем пробелы, тире, скобки и прочие символы кроме цифр и плюса
-    phone = re.sub(r"[^\d+]", "", phone)
-
-    # Если начинается с 8, заменим на +7 (российская стандартизация)
-    if phone.startswith("8") and len(phone) == 11:
-        normalized = "+7" + phone[1:]
-    elif phone.startswith("7") and len(phone) == 11:
-        normalized = "+7" + phone[1:]
-    elif phone.startswith("+") and 11 <= len(re.sub(r"\D", "", phone)) <= 15:
-        normalized = phone
-    else:
-        # Невалидный формат
+    normalized_phone = normalize_phone_number(phone)
+    if not normalized_phone:
         await message.answer(
             "⚠️ Введите корректный номер телефона с кодом страны, например: +79001234567",
             reply_markup=ReplyKeyboardRemove()
         )
         return
 
-    # Финальная проверка на формат
-    if not re.fullmatch(r"^\+\d{11,15}$", normalized):
-        await message.answer(
-            "⚠️ Номер должен начинаться с + и содержать от 11 до 15 цифр. Попробуйте снова.",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        return
-
-    await state.update_data(phone_number=normalized)
+    await state.update_data(phone_number=normalized_phone)
     await state.set_state(LoyaltyCardForm.email)
     await message.answer(
         "Введите ваш email:",
-        reply_markup=ReplyKeyboardRemove()
+        reply_markup=cancel_keyboard
     )
 
-
+# Обрабатывает ввод почты пользователя, проверяет корректность, сохраняет в состояние FSM и создает карту
 @loyalty_router.message(LoyaltyCardForm.email)
 async def collect_email_and_create(message: Message, state: FSMContext):
-    """Собирает email и создаёт карту лояльности.
-
-    Args:
-        message (Message): Сообщение с email.
-        state (FSMContext): Контекст состояния FSM для получения данных.
-
-    Notes:
-        Выполняет обновление данных пользователя и создание карты через API.
     """
+    Асинхронная функция для сбора email пользователя, обновления его данных и создания карты лояльности.
+    Аргументы:
+        message (Message): Сообщение пользователя, содержащее email.
+        state (FSMContext): Контекст конечного автомата состояний для хранения промежуточных данных.
+    Описание:
+        - Проверяет корректность введённого email.
+        - Обновляет данные пользователя в базе.
+        - Создаёт карту лояльности для пользователя.
+        - Загружает и отправляет изображение карты пользователю, если оно доступно.
+        - Обрабатывает возможные ошибки и уведомляет пользователя в случае неудачи.
+        - Очищает состояние после завершения обработки.
+    """
+    
     if not email_pattern.fullmatch(message.text.strip()):
-        await message.answer("⚠️ Неверный формат email. Попробуйте снова:")
+        await message.answer(
+            "⚠️ Неверный формат email. Попробуйте снова:",
+            reply_markup=cancel_keyboard
+        )
         return
+    
     await state.update_data(email=message.text.strip())
     data = await state.get_data()
     user_id = message.from_user.id
     logger.info(f"Collected data for loyalty card creation for user_id={user_id}: {data}")
     try:
-        # Обновляем данные пользователя
+        # Обновляем данные пользователя в базе
         updated = await update_user_data(
             user_id=user_id,
             first_name=data["first_name"],
@@ -261,7 +226,7 @@ async def collect_email_and_create(message: Message, state: FSMContext):
             await state.clear()
             return
 
-        # Создаем карту
+        # Создаем карту лояльности
         card = await create_loyalty_card(user_id)
         if card is None:
             card = await fetch_loyalty_card(user_id)
@@ -274,6 +239,7 @@ async def collect_email_and_create(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        # Проверяем наличие изображения карты
         card_image_url = card.get("card_image")
         if not card_image_url:
             logger.warning(f"No card image available for user_id={user_id}")
@@ -284,6 +250,7 @@ async def collect_email_and_create(message: Message, state: FSMContext):
             await state.clear()
             return
 
+        # Отправляем изображение карты пользователю
         async with aiohttp.ClientSession() as session:
             async with session.get(card_image_url) as img_resp:
                 if img_resp.status == 200:
@@ -304,4 +271,4 @@ async def collect_email_and_create(message: Message, state: FSMContext):
             reply_markup=main_kb
         )
     finally:
-        await state.clear()
+        await state.clear() # Очистка состояния
