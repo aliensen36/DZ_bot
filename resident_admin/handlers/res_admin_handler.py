@@ -4,7 +4,7 @@ import logging
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
 from aiogram.types import Message
-from resident_admin.handlers.utils.point_transactions import accrue_points
+from resident_admin.handlers.utils.point_transactions import accrue_points, deduct_points
 from resident_admin.keyboards.res_admin_reply import res_admin_keyboard
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID, RESIDENT_ADMIN_CHAT_ID
 from aiogram.fsm.context import FSMContext
@@ -43,10 +43,18 @@ async def resident_admin_panel(message: Message):
 async def cmd_add_points(message: Message, state: FSMContext):
     await message.answer('Введите сумму покупки:')
     await state.set_state(TransactionFSM.price)
+    await state.update_data(transaction_type='начисление')
+    
+@res_admin_router.message(F.text == '💸 Списать бонусы')
+async def cmd_deduct_points(message: Message, state: FSMContext):
+    await message.answer('Введите сумму для списания (₽):')
+    await state.set_state(TransactionFSM.price)
+    await state.update_data(transaction_type='списание')
+
     
 @res_admin_router.message(TransactionFSM.price)
 async def get_price_points(message: Message, state: FSMContext):
-    message_text = await message.text
+    message_text = message.text
     if not message.text.isdigit() or int(message.text) <= 0:
         await message.answer("Сумма должна быть положительным числом!")
         return
@@ -57,26 +65,32 @@ async def get_price_points(message: Message, state: FSMContext):
 
 @res_admin_router.message(TransactionFSM.card_id)
 async def get_card_id(message: Message, state: FSMContext):
-    message_text = await message.text
+    message_text = message.text
     import re
     CARD_RE = re.compile(r"^\d{3}-\d{3}-\d{3}-\d{3}$")
     if not CARD_RE.fullmatch(message.text):
         await message.answer("Формат карты: xxx-xxx-xxx-xxx")
         return
 
-    
-    await state.update_data(card_id = message_text)
-    await state.update_data(resident_tg_id = await message.from_user.id)
-    await state.update_data(transaction_type = 'начисление')
+    await state.update_data(card_id=message.text, resident_tg_id=message.from_user.id)
     data = await state.get_data()
-    
-    result = await accrue_points(
-        price=int(data["price"]),
-        card_id=data["card_id"],
-        resident_tg_id=data["resident_tg_id"],
-    )
-    await message.answer(f"Бонусы начислены 🎉\n{result}")
+    try:
+        if data['transaction_type'] == 'начисление':
+            result = await accrue_points(
+                price=int(data["price"]),
+                card_id=data["card_id"],
+                resident_tg_id=data["resident_tg_id"],
+            )
+            await message.answer(f"✅ Бонусы начислены")
+        else:  # списание
+            result = await deduct_points(
+                price=int(data["price"]),
+                card_id=data["card_id"],
+                resident_tg_id=data["resident_tg_id"],
+            )
+            await message.answer(f"✅ Бонусы списаны")
+    except ValueError as e:
+        await message.answer(f"Произошла Ошибка\n{e}")
     await state.clear()
-        
-        
+
     
