@@ -1,21 +1,32 @@
 import logging
+
 import aiohttp
-from aiogram import Router
-from aiogram.types import Message
+from aiogram import Router, types
+from aiogram.types import Message, FSInputFile
 from aiogram.filters import CommandStart
 from aiohttp import ClientConnectorError, ServerTimeoutError
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import StatesGroup, State
 
 from data.config import config_settings
-from data.url import url_users
+from data.url import url_users, url_subscription
 from client.keyboards.reply import main_kb
+from client.keyboards.inline import build_interests_keyboard, get_subscriptions_name
+from client.services.subscriptions import get_subscriptions_data
 
 logger = logging.getLogger(__name__)
 
 start_router = Router()
 
 
+# Состояния конечного автомата:
+# choosing — пользователь выбирает интересы после регистрации.
+class Form(StatesGroup):
+    choosing = State()
+
+
 @start_router.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext):
     """Обрабатывает команду /start для регистрации или приветствия пользователя.
 
     Args:
@@ -24,6 +35,7 @@ async def cmd_start(message: Message):
     Notes:
         Выполняет POST-запрос к API для регистрации и отправляет приветствие в зависимости от статуса (200 или 201).
     """
+    # Данные пользователя, отправляемые при регистрации в API
     user_data = {
         "tg_id": message.from_user.id,
         "first_name": message.from_user.first_name or "",
@@ -42,21 +54,38 @@ async def cmd_start(message: Message):
                 ) as resp:
                     response_data = await resp.json()
 
-                    # Основная логика для успешных ответов (200 или 201)
+                    # 201 — новый пользователь, запускаем процесс выбора интересов
+                    # 200 — существующий пользователь, просто приветствуем
                     if resp.status in (200, 201):
                         greeting_name = response_data.get('first_name', message.from_user.first_name)
 
                         # Определяем текст приветствия
                         if resp.status == 201:
-                            greeting_text = "Рады тебя видеть в нашем боте! 🤖💫"
-                        else:  # 200
-                            greeting_text = "С возвращением! Рады видеть вас снова! 🤗"
+                            # Приветственный текст
+                            greeting_text = (
+                                "<b>Привет!</b>\n\n"
+                                "<b>Добро пожаловать в мир Дизайн-Завода 🎉</b>\n\n"
+                                "Чтобы подсказать тебе самое интересное из жизни Дизайн-Завода, отметь, что тебе ближе 💛"
+                            )
 
-                        await message.answer(
-                            f"✨ Привет, <b>{greeting_name}</b>! ✨\n\n"
-                            f"{greeting_text}",
-                            reply_markup=main_kb
-                        )
+                            await state.set_state(Form.choosing)
+                            await state.update_data(selected=[])
+
+                            await message.answer(
+                                greeting_text,
+                                parse_mode="HTML",
+                                reply_markup = await build_interests_keyboard([])
+                            )
+
+                        elif resp.status == 200:
+                            greeting_text = "Рады снова приветствовать тебя в боте Дизайн-Завода ❤"
+
+                            await message.answer(
+                                f"Привет, <b>{greeting_name}</b>!\n\n"
+                                f"{greeting_text}",
+                                parse_mode="HTML",
+                                reply_markup=main_kb
+                            )
 
                     # Обработка других статусов
                     else:
@@ -101,3 +130,95 @@ async def cmd_start(message: Message):
             "Сервис временно ограничен, но основные функции доступны.",
             reply_markup=main_kb
         )
+
+
+@start_router.callback_query(Form.choosing)
+async def process_choice(callback: types.CallbackQuery, state: FSMContext):
+    """
+    Обрабатывает выбор пользователя при выборе интересов (подписок) через callback-кнопки.
+    Аргументы:
+        callback (types.CallbackQuery): Объект callback-запроса от пользователя.
+        state (FSMContext): Контекст состояния конечного автомата для хранения данных пользователя.
+    Описание:
+        - Если пользователь нажал кнопку "Готово" ("done"):
+            - Проверяет, выбраны ли интересы. Если нет — отправляет уведомление.
+            - Получает данные о подписках и отправляет запросы на подписку для каждого выбранного интереса.
+            - В случае ошибки выводит сообщение в консоль.
+            - Отправляет пользователю сообщение с подтверждением и иконкой меню.
+            - Очищает состояние пользователя.
+        - Если пользователь выбирает или отменяет интерес:
+            - Обновляет список выбранных интересов в состоянии.
+            - Перестраивает клавиатуру с учетом новых выбранных интересов.
+            - Обновляет разметку сообщения, если она изменилась.
+        - В конце всегда отправляет ответ на callback-запрос.
+    """
+
+    data = await state.get_data()
+    selected = data.get("selected", [])
+
+    # Получаем список названий подписок из API
+    available_options = await get_subscriptions_name()
+
+    # Пользователь нажал "Готово" — отправляем данные о подписках
+    if callback.data == "done":
+        if not selected:
+            await callback.answer("Вы ничего не выбрали!")
+            return
+        
+        try:
+            subscriptions = await get_subscriptions_data()
+            # Преобразуем список подписок в словарь: {название: id}
+            name_to_id = {sub["name"]: sub["id"] for sub in subscriptions}
+
+            headers = {
+                "X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()
+            }
+
+            user_id = str(callback.from_user.id)
+            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+                for name in selected:
+                    subscription_id = name_to_id.get(name)
+                    if not subscription_id:
+                        continue
+
+                    async with session.post(
+                        url=f"{url_subscription}{subscription_id}/subscribe/",
+                        headers=headers,
+                        json={"tg_id": user_id}
+                    ) as response:
+                        if response.status != 200:
+                            print(f"Ошибка при подписке на {name}: {response.status}")
+        except Exception as e:
+            logger.exception("Сбой при отправке подписок")
+
+        menu_icon = FSInputFile("static/menu_icon.png")
+
+        interests_text = (
+            "Супер! Мы запомнили твои интересы.\n\n"
+            "Ты всегда можешь их изменить в личном кабинете.\n"
+            "Для вызова главного меню ты всегда можешь воспользоваться волшебной иконкой в панели меню."
+        )
+
+        await callback.message.answer_photo(
+            photo=menu_icon,
+            caption=interests_text,
+            parse_mode="HTML",
+            reply_markup=main_kb
+        )
+        await state.clear()
+        return
+
+    if callback.data in available_options:
+        if callback.data in selected:
+            selected.remove(callback.data)
+        else:
+            selected.append(callback.data)
+
+        await state.update_data(selected=selected)
+
+        new_markup = await build_interests_keyboard(selected)
+
+        if callback.message.reply_markup != new_markup:
+            await callback.message.edit_reply_markup(reply_markup=new_markup)
+
+    await callback.answer()
