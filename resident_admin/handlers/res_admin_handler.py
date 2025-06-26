@@ -1,5 +1,5 @@
 import logging
-
+import re
 
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
@@ -23,13 +23,14 @@ class TransactionFSM(StatesGroup):
     """Состояния FSM для транзакций бонусов.
 
     States:
-        price: сумма покупки.
         card_id: id карты лояльности.
+        price: сумма покупки.
         transaction_type: тип транзакции.
         resident_id: id резидента
     """
-    price = State()
+    phone_number = State()
     card_id = State()
+    price = State()
     transaction_type = State()
     resident_tg_id = State()
     
@@ -38,14 +39,46 @@ class TransactionFSM(StatesGroup):
 async def resident_admin_panel(message: Message):
     await message.answer("Добро пожаловать в резидентскую админ-панель!",
                          reply_markup=res_admin_keyboard())
-    
-@res_admin_router.message(F.text == '🎁 Начислить бонусы')
+
+
+@res_admin_router.message(F.text == 'Начислить баллы')
+async def cmd_add_points(message: Message, state: FSMContext):
+    await message.answer('Введите номер телефона покупателя (формат: 79998887766 или +79998887766):')
+    await state.set_state(TransactionFSM.phone_number)
+    await state.update_data(transaction_type='начисление')
+
+
+@res_admin_router.message(TransactionFSM.phone_number)
+async def process_phone_number(message: Message, state: FSMContext):
+    phone_number = message.text.strip()
+
+    # Проверка корректности номера телефона
+    if not re.fullmatch(r'^(\+7|7|8)\d{10}$', phone_number):
+        await message.answer(
+            'Некорректный формат номера. Пожалуйста, введите номер в формате 79998887766 или +79998887766:')
+        return
+
+    # Нормализация номера (приводим к формату 7XXXXXXXXXX)
+    if phone_number.startswith('+7'):
+        normalized_phone = phone_number[1:]
+    elif phone_number.startswith('8'):
+        normalized_phone = '7' + phone_number[1:]
+    else:
+        normalized_phone = phone_number
+
+    await state.update_data(phone=normalized_phone)
+    await message.answer('Введите сумму покупки:')
+    await state.set_state(TransactionFSM.price)
+
+
+
+@res_admin_router.message(F.text == 'Начислить баллы')
 async def cmd_add_points(message: Message, state: FSMContext):
     await message.answer('Введите сумму покупки:')
     await state.set_state(TransactionFSM.price)
     await state.update_data(transaction_type='начисление')
     
-@res_admin_router.message(F.text == '💸 Списать бонусы')
+@res_admin_router.message(F.text == 'Списать баллы')
 async def cmd_deduct_points(message: Message, state: FSMContext):
     await message.answer('Введите сумму для списания (₽):')
     await state.set_state(TransactionFSM.price)

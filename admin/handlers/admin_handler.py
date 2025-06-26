@@ -291,7 +291,8 @@ async def export_users_excel(callback: CallbackQuery):
     finally:
         await callback.answer()
 
-@admin_router.message(F.text == "🚪 Выход")
+
+@admin_router.message(F.text == "Выход")
 async def exit_admin_panel(message: Message):
     """Выходит из админ-панели и возвращает основное меню.
 

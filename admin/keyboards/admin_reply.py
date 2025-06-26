@@ -15,7 +15,7 @@ def admin_keyboard():
     builder.button(text="📢 Рассылка")
     builder.button(text="🏢 Резиденты")
     # builder.button(text="🔧 Настройки")
-    builder.button(text="🚪 Выход")
+    builder.button(text="Выход")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
