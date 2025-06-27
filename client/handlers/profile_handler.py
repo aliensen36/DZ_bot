@@ -82,11 +82,12 @@ async def handle_profile(message: Message):
     """
     
     try:
-        await message.answer("...", reply_markup=ReplyKeyboardRemove())
+        temp_message = await message.answer("...", reply_markup=ReplyKeyboardRemove())
         await message.answer(
             "Добро пожаловать в личный кабинет.",
             reply_markup=await get_profile_inline_kb()
         )
+        await temp_message.delete()
     except Exception as e:
         logging.error(f"Error handling profile request: {e}", exc_info=True)
         await message.answer("⚠️ Произошла ошибка, попробуйте позже")
