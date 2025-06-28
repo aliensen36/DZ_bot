@@ -42,7 +42,7 @@ async def update_user_data(
         payload["phone_number"] = phone_number
     if email is not None:
         payload["email"] = email
-        
+
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
     url = f"{url_users.rstrip('/')}/{user_id}/"
     logger.info(f"Updating user data for user_id={user_id} with payload={payload}, url={url}")

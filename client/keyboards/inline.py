@@ -10,7 +10,6 @@ async def get_profile_inline_kb() -> InlineKeyboardMarkup:
     Клавиатура включает следующие кнопки:
         - "Мои данные": просмотр личных данных пользователя.
         - "Мои подписки": просмотр подписок пользователя.
-        - "Мои бонусы": просмотр бонусов пользователя.
         - "Назад в главное меню": возврат в главное меню.
     Возвращает:
         InlineKeyboardMarkup: Сконструированная inline-клавиатура.
@@ -23,8 +22,6 @@ async def get_profile_inline_kb() -> InlineKeyboardMarkup:
                              callback_data="my_data"),
         InlineKeyboardButton(text="Мои подписки",
                              callback_data="my_subscriptions"),
-        InlineKeyboardButton(text="Мои бонусы",
-                             callback_data="my_bonuses"),
         InlineKeyboardButton(text="Назад в главное меню",
                              callback_data="back_to_main")
         ]
@@ -92,7 +89,6 @@ async def user_data_inline_kb() -> InlineKeyboardMarkup:
     Создаёт и возвращает инлайн-клавиатуру для пользователя с кнопками:
     - "Изменить данные"
     - "Мои подписки"
-    - "Мои бонусы"
     - "Назад в главное меню"
     Возвращает:
         InlineKeyboardMarkup: Объект инлайн-клавиатуры для Telegram-бота.
@@ -105,8 +101,6 @@ async def user_data_inline_kb() -> InlineKeyboardMarkup:
                              callback_data="change_user_data"),
         InlineKeyboardButton(text="Мои подписки",
                              callback_data="my_subscriptions"),
-        InlineKeyboardButton(text="Мои бонусы",
-                             callback_data="my_bonuses"),
         InlineKeyboardButton(text="Назад в главное меню",
                              callback_data="back_to_main")
         ]
@@ -164,7 +158,6 @@ async def subscription_data_inline_kb() -> InlineKeyboardMarkup:
     Клавиатура содержит следующие кнопки:
     - "Изменить подписки" — позволяет изменить текущие подписки пользователя.
     - "Мои данные" — отображает личные данные пользователя.
-    - "Мои бонусы" — показывает бонусы пользователя.
     - "Назад в главное меню" — возвращает в главное меню.
     Возвращает:
         InlineKeyboardMarkup: Объект инлайн-клавиатуры для Telegram-бота.
@@ -177,8 +170,6 @@ async def subscription_data_inline_kb() -> InlineKeyboardMarkup:
                              callback_data="edit_subscriptions"),
         InlineKeyboardButton(text="Мои данные",
                              callback_data="my_data"),
-        InlineKeyboardButton(text="Мои бонусы",
-                             callback_data="my_bonuses"),
         InlineKeyboardButton(text="Назад в главное меню",
                              callback_data="back_to_main")
         ]

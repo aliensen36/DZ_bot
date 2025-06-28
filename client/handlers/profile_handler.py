@@ -26,7 +26,7 @@ from client.keyboards.inline import (
 )
 
 from client.keyboards.reply import main_kb, edit_data_keyboard
-from client.services.loyalty import fetch_loyalty_card
+from client.services.loyalty import fetch_loyalty_card, get_user_data
 from client.services.user import update_user_data
 from client.services.subscriptions import get_my_subscriptions, get_subscriptions_data
 from utils.validators import name_pattern, email_pattern
@@ -110,37 +110,57 @@ async def my_data_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
     await callback.answer()
 
-    card =  await fetch_loyalty_card(user_id)
-
     try:
+        # Проверяем наличие карты лояльности
+        card = await fetch_loyalty_card(user_id)
         if not card:
             await callback.message.answer(
                 "Вы не зарегистрированы в системе лояльности",
                 reply_markup=await no_user_data_inline_kb()
             )
             return
-        
+
+        # Получаем данные пользователя
+        user_data = await get_user_data(user_id)
+        if not user_data:
+            await callback.message.answer(
+                "Не удалось получить данные пользователя. Попробуйте позже.",
+                reply_markup=await user_data_inline_kb()
+            )
+            return
+
+        # Формируем сообщение с данными пользователя
         user_data_message = (
             f"<b>Ваши данные:</b>\n\n"
-            f"Имя: {card.get('user_first_name')}\n"
-            f"Фамилия: {card.get('user_last_name')}\n"
-            f"Дата рождения: {card.get('birth_date')}\n"
-            f"Телефон: {card.get('phone_number')}\n"
-            f"Email: {card.get('email')}\n\n"
+            f"Имя: {user_data.get('user_first_name', 'Не указано')}\n"
+            f"Фамилия: {user_data.get('user_last_name', 'Не указано')}\n"
+            f"Дата рождения: {user_data.get('birth_date', 'Не указано')}\n"
+            f"Телефон: {user_data.get('phone_number', 'Не указано')}\n"
+            f"Email: {user_data.get('email', 'Не указано')}\n\n"
         )
 
         await callback.message.answer(
             user_data_message,
             reply_markup=await user_data_inline_kb(),
+            parse_mode="HTML"
         )
 
     except TelegramBadRequest as e:
         if "message is not modified" in str(e):
-            logging.debug(f"Ignored 'message not modified' for user {callback.from_user.id}")
+            logger.debug(f"Ignored 'message not modified' for user {user_id}")
         else:
-            logging.error(f"TelegramBadRequest: {e}")
-            await callback.answer()
-            raise
+            logger.error(f"TelegramBadRequest: {e}")
+            await callback.message.answer(
+                "Произошла ошибка. Попробуйте позже.",
+                reply_markup=await get_profile_inline_kb()
+            )
+    except Exception as e:
+        logger.error(f"Error handling my_data for user {user_id}: {e}")
+        await callback.message.answer(
+            "Произошла ошибка. Попробуйте позже.",
+            reply_markup=await get_profile_inline_kb()
+        )
+
 
 # Обработчик: Выбор изменения данных пользователя
 @profile_router.callback_query(F.data == "change_user_data")
@@ -278,13 +298,13 @@ async def my_subscriptions_handler(callback: CallbackQuery):
         иначе логирует и пробрасывает исключение дальше.
         В конце всегда отправляет ответ на callback для предотвращения зависания интерфейса.
     """
-    
+
     try:
         subscriptions = await get_my_subscriptions(callback.from_user.id)
         if not subscriptions:
             user_data_message = "У вас пока нет активных подписок."
         else:
-            subscriptions_list = "\n".join(f"{i+1}. {name}" for i, name in enumerate(subscriptions))
+            subscriptions_list = "\n".join(f"{i + 1}. {name}" for i, name in enumerate(subscriptions))
             user_data_message = (
                 f"<b>Ваши подписки:</b>\n\n"
                 f"{subscriptions_list}"
@@ -442,63 +462,3 @@ async def process_edit_choice(callback: CallbackQuery, state: FSMContext):
             await callback.message.edit_reply_markup(reply_markup=new_markup)
 
     await callback.answer()
-    
-
-# Хендлер для кнопки "Мои подписки"
-@profile_router.callback_query(F.data == "my_bonuses")
-async def my_bonuses_handler(callback: CallbackQuery):
-    """
-    Обрабатывает запрос пользователя на получение информации о бонусах.
-    Аргументы:
-        callback (CallbackQuery): Объект callback-запроса от пользователя Telegram.
-    Описание:
-        - Проверяет наличие карты лояльности у пользователя.
-        - Если карта отсутствует, отправляет сообщение с предложением присоединиться к системе лояльности.
-        - Если карта есть, делает запрос к внешнему API для получения баланса бонусов.
-        - В случае успешного получения баланса отправляет пользователю сообщение с количеством бонусов.
-        - В случае ошибки информирует пользователя о проблеме и записывает ошибку в лог.
-    Исключения:
-        Логирует и обрабатывает любые исключения, возникающие в процессе выполнения.
-    """
-
-    user_id = callback.from_user.id
-    await callback.answer()
-
-    url = f"{url_loyalty}balance/?tg_id={user_id}"
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-
-    try:
-        # Проверка наличия карты лояльности у пользователя
-        card = await fetch_loyalty_card(user_id)
-        if not card:
-            await callback.message.answer(
-                "Для получения бонусов необходимо быть участником нашей системы лояльности",
-                reply_markup = await no_user_data_inline_kb()
-            )
-            return
-
-        # Получаем баланс
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.get(url, headers=headers) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    balance = data.get("balance")
-                else:
-                    await callback.message.answer(
-                        "Произошла ошибка при получении баллов. Попробуйте позже или обратитесь в поддержку.",
-                        reply_markup=main_kb
-                    )
-                    return
-
-        # Формируем сообщение с балансом
-        bonus_word = get_bonus_word_form(balance)
-        bonus_data_message = f"Ваш баланс - {balance} {bonus_word}"
-
-        await callback.message.answer(
-            bonus_data_message,
-            reply_markup=await bonus_data_inline_kb()
-        )
-
-    except Exception as e:
-        logger.exception(f"Ошибка при получении баланса или карты для пользователя {user_id}: {e}")
-        await callback.message.answer("Произошла ошибка при получении информации о бонусах.")
