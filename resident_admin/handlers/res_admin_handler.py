@@ -1,14 +1,17 @@
-import logging
 import re
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message
-from resident_admin.services.point_transactions import accrue_points, deduct_points
+from aiogram.types import Message, BufferedInputFile
+
+from client.services.loyalty import fetch_loyalty_card
+from resident_admin.services.point_transactions import add_points_to_card, \
+    find_user_by_card_number, get_card_number_by_user, find_user_by_phone
 from resident_admin.keyboards.res_admin_reply import res_admin_keyboard
 from utils.filters import ChatTypeFilter, IsGroupAdmin, RESIDENT_ADMIN_CHAT_ID
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+import logging
 logger = logging.getLogger(__name__)
 
 res_admin_router = Router()
@@ -21,15 +24,14 @@ class TransactionFSM(StatesGroup):
     """Состояния FSM для транзакций бонусов.
 
     States:
-        card_id: id карты лояльности.
+        phone_number: номер телефона покупателя
         price: сумма покупки.
         transaction_type: тип транзакции.
         resident_id: id резидента
     """
-    phone_number = State()
-    card_id = State()
-    price = State()
+    number = State()
     transaction_type = State()
+    price = State()
     resident_tg_id = State()
     
     
@@ -39,89 +41,92 @@ async def resident_admin_panel(message: Message):
                          reply_markup=res_admin_keyboard())
 
 
-@res_admin_router.message(F.text == 'Начислить баллы')
+# Хендлер для команды "Бонусы"
+@res_admin_router.message(F.text == 'Бонусы')
 async def cmd_add_points(message: Message, state: FSMContext):
-    await message.answer('Введите номер телефона покупателя (формат: 79998887766 или +79998887766):')
-    await state.set_state(TransactionFSM.phone_number)
-    await state.update_data(transaction_type='начисление')
+    await message.answer('Введите номер телефона покупателя (формат: 79998887766 или +79998887766) '
+                         'или номер карты (формат: 123 456):')
+    await state.set_state(TransactionFSM.number)
 
 
-@res_admin_router.message(TransactionFSM.phone_number)
-async def process_phone_number(message: Message, state: FSMContext):
-    phone_number = message.text.strip()
+# Хендлер для обработки номера телефона или карты
+@res_admin_router.message(TransactionFSM.number)
+async def process_phone_or_card(message: Message, state: FSMContext):
+    input_text = message.text.strip()
 
-    # Проверка корректности номера телефона
-    if not re.fullmatch(r'^(\+7|7|8)\d{10}$', phone_number):
-        await message.answer(
-            'Некорректный формат номера. Пожалуйста, введите номер в формате 79998887766 или +79998887766:')
-        return
+    # Проверка формата номера телефона
+    phone_pattern = r'^\+?7\d{10}$'
+    # Проверка формата номера карты (6 цифр, с пробелом или без)
+    card_number_pattern = r'^\d{3}\s?\d{3}$'
 
-    # Нормализация номера (приводим к формату 7XXXXXXXXXX)
-    if phone_number.startswith('+7'):
-        normalized_phone = phone_number[1:]
-    elif phone_number.startswith('8'):
-        normalized_phone = '7' + phone_number[1:]
+    # Форматируем входные данные
+    if re.match(phone_pattern, input_text):
+        phone_number = input_text.replace('+', '')  # Убираем + для единообразия
+        logger.info(f"Processing phone_number: {phone_number}")
+        user_data = await find_user_by_phone(phone_number)
+        if user_data and user_data.get('tg_id'):
+            card_data = await fetch_loyalty_card(user_data['tg_id'])
+            if card_data and card_data.get('card_image'):
+                card_number = await get_card_number_by_user(user_data['tg_id'])
+                if card_number:
+                    # Сохраняем данные в состоянии
+                    await state.update_data(user_data=user_data, card_number=card_number)
+                    # Отправляем изображение карты
+                    await message.answer_photo(
+                        photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
+                        caption=(
+                            f"Карта найдена: {card_number} "
+                            f"(Клиент: {user_data['user_first_name']} {user_data['user_last_name']}).\n"
+                            f"Выберите тип транзакции (начисление или списание):"
+                        )
+                    )
+                    await state.set_state(TransactionFSM.transaction_type)
+                else:
+                    await message.answer(
+                        "Не удалось получить номер карты. Попробуйте ввести номер карты (формат: 123 456):"
+                    )
+                    await state.set_state(TransactionFSM.number)
+            else:
+                await message.answer(
+                    "Карта не может быть сгенерирована по номеру телефона. Попробуйте ввести номер карты (формат: 123 456):"
+                )
+                await state.set_state(TransactionFSM.number)
+        else:
+            await message.answer(
+                "Пользователь не найден по номеру телефона. Попробуйте ввести номер карты (формат: 123 456):"
+            )
+            await state.set_state(TransactionFSM.number)
+    elif re.match(card_number_pattern, input_text):
+        card_number = input_text.replace(' ', '')  # Убираем пробел для единообразия
+        user_data = await find_user_by_card_number(card_number)
+        if user_data and user_data.get('tg_id'):
+            card_data = await fetch_loyalty_card(user_data['tg_id'])
+            if card_data and card_data.get('card_image'):
+                # Сохраняем данные в состоянии
+                await state.update_data(user_data=user_data, card_number=card_number)
+                # Отправляем изображение карты
+                await message.answer_photo(
+                    photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
+                    caption=(
+                        f"Карта найдена: {card_number} "
+                        f"(Клиент: {user_data['user_first_name']} {user_data['user_last_name']}).\n"
+                        f"Выберите тип транзакции (начисление или списание):"
+                    )
+                )
+                await state.set_state(TransactionFSM.transaction_type)
+            else:
+                await message.answer(
+                    "Карта не может быть сгенерирована по номеру карты. Попробуйте еще раз или введите номер телефона:"
+                )
+                await state.set_state(TransactionFSM.number)
+        else:
+            await message.answer(
+                "Пользователь не найден по номеру карты. Попробуйте еще раз или введите номер телефона:"
+            )
+            await state.set_state(TransactionFSM.number)
     else:
-        normalized_phone = phone_number
-
-    await state.update_data(phone=normalized_phone)
-    await message.answer('Введите сумму покупки:')
-    await state.set_state(TransactionFSM.price)
+        await message.answer(
+            "Неверный формат. Введите номер телефона (79998887766 или +79998887766) или номер карты (123 456):"
+        )
 
 
-
-@res_admin_router.message(F.text == 'Начислить баллы')
-async def cmd_add_points(message: Message, state: FSMContext):
-    await message.answer('Введите сумму покупки:')
-    await state.set_state(TransactionFSM.price)
-    await state.update_data(transaction_type='начисление')
-    
-@res_admin_router.message(F.text == 'Списать баллы')
-async def cmd_deduct_points(message: Message, state: FSMContext):
-    await message.answer('Введите сумму для списания (₽):')
-    await state.set_state(TransactionFSM.price)
-    await state.update_data(transaction_type='списание')
-
-    
-@res_admin_router.message(TransactionFSM.price)
-async def get_price_points(message: Message, state: FSMContext):
-    message_text = message.text
-    if not message.text.isdigit() or int(message.text) <= 0:
-        await message.answer("Сумма должна быть положительным числом!")
-        return
-
-    await state.update_data(price = message_text)
-    await message.answer('введите номер карты лояльности')
-    await state.set_state(TransactionFSM.card_id)
-
-@res_admin_router.message(TransactionFSM.card_id)
-async def get_card_id(message: Message, state: FSMContext):
-    message_text = message.text
-    import re
-    CARD_RE = re.compile(r"^\d{3}-\d{3}-\d{3}-\d{3}$")
-    if not CARD_RE.fullmatch(message.text):
-        await message.answer("Формат карты: xxx-xxx-xxx-xxx")
-        return
-
-    await state.update_data(card_id=message.text, resident_tg_id=message.from_user.id)
-    data = await state.get_data()
-    try:
-        if data['transaction_type'] == 'начисление':
-            result = await accrue_points(
-                price=int(data["price"]),
-                card_id=data["card_id"],
-                resident_tg_id=data["resident_tg_id"],
-            )
-            await message.answer(f"✅ Бонусы начислены")
-        else:  # списание
-            result = await deduct_points(
-                price=int(data["price"]),
-                card_id=data["card_id"],
-                resident_tg_id=data["resident_tg_id"],
-            )
-            await message.answer(f"✅ Бонусы списаны")
-    except ValueError as e:
-        await message.answer(f"Произошла Ошибка\n{e}")
-    await state.clear()
-
-    
