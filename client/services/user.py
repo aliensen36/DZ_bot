@@ -1,12 +1,46 @@
 import logging
 import aiohttp
 from typing import Optional
-
 from data.config import config_settings
 from data.url import url_users
+import re
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+
+name_pattern = re.compile(r"^[А-Яа-яA-Za-zёЁ\-]{2,}$")
+email_pattern = re.compile(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$")
+
+
+def normalize_phone_number(phone: str) -> str | None:
+    """Нормализует номер телефона, возвращает None при ошибке."""
+    # Удаляем все, кроме цифр и плюса
+    phone = re.sub(r"[^\d+]", "", phone)
+
+    # Нормализация
+    if phone.startswith("8") and len(phone) == 11:
+        normalized = "+7" + phone[1:]
+    elif phone.startswith("7") and len(phone) == 11:
+        normalized = "+7" + phone[1:]
+    elif phone.startswith("+") and 11 <= len(re.sub(r"\D", "", phone)) <= 15:
+        normalized = phone
+    else:
+        return None
+
+    # Финальная проверка
+    if not re.fullmatch(r"^\+\d{11,15}$", normalized):
+        return None
+    return normalized
+
+
+def parse_birth_date(date_str: str) -> str | None:
+    """Парсит дату рождения в формате ДД.ММ.ГГГГ и возвращает ISO-формат."""
+    try:
+        birth_date_obj = datetime.strptime(date_str, "%d.%m.%Y")
+        return birth_date_obj.date().isoformat()
+    except ValueError:
+        return None
 
 async def update_user_data(
     user_id: int,

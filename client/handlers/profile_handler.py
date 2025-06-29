@@ -14,23 +14,22 @@ from aiogram import F
 import aiohttp
 
 from data.config import config_settings
-from data.url import url_subscription, url_loyalty
+from data.url import url_subscription
 from client.keyboards.inline import (
     get_profile_inline_kb,
     build_interests_keyboard,
     no_user_data_inline_kb,
     user_data_inline_kb,
-    bonus_data_inline_kb,
     subscription_data_inline_kb,
     get_subscriptions_name
 )
 
 from client.keyboards.reply import main_kb, edit_data_keyboard
 from client.services.loyalty import fetch_loyalty_card, get_user_data
-from client.services.user import update_user_data
+from client.services.user import update_user_data, parse_birth_date, normalize_phone_number, name_pattern, email_pattern
 from client.services.subscriptions import get_my_subscriptions, get_subscriptions_data
-from utils.validators import name_pattern, email_pattern
-from utils.client_utils import get_bonus_word_form, normalize_phone_number, parse_birth_date
+
+
 
 logger = logging.getLogger(__name__)
 

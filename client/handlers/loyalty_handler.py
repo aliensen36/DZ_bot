@@ -1,23 +1,18 @@
 import logging
-
 from aiogram import Router, F
 from aiogram.types import (
     Message, BufferedInputFile,
     ReplyKeyboardMarkup, KeyboardButton,
     CallbackQuery, ReplyKeyboardRemove
 )
-
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-import aiohttp
-
 from client.keyboards.reply import main_kb
 from client.services.loyalty import fetch_loyalty_card, get_user_data
-from client.services.user import update_user_data
+from client.services.user import update_user_data, parse_birth_date, normalize_phone_number, name_pattern, email_pattern
 from client.keyboards.reply import cancel_keyboard
-from data.config import config_settings
-from utils.validators import name_pattern, email_pattern
-from utils.client_utils import parse_birth_date, normalize_phone_number
+
+
 
 logger = logging.getLogger(__name__)
 

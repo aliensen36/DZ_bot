@@ -1,17 +1,15 @@
 import logging
 import re
-
-from aiogram import Router, F, Bot
+from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message
-from resident_admin.handlers.utils.point_transactions import accrue_points, deduct_points
+from resident_admin.services.point_transactions import accrue_points, deduct_points
 from resident_admin.keyboards.res_admin_reply import res_admin_keyboard
-from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID, RESIDENT_ADMIN_CHAT_ID
+from utils.filters import ChatTypeFilter, IsGroupAdmin, RESIDENT_ADMIN_CHAT_ID
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 logger = logging.getLogger(__name__)
-
 
 res_admin_router = Router()
 res_admin_router.message.filter(
