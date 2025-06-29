@@ -1,11 +1,11 @@
 import re
 from aiogram import Router, F
 from aiogram.filters import Command
-from aiogram.types import Message, BufferedInputFile
+from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton
 
 from client.services.loyalty import fetch_loyalty_card
 from resident_admin.services.point_transactions import find_user_by_card_number, get_card_number_by_user, \
-    find_user_by_phone
+    find_user_by_phone, get_card_id_by_tg_id
 from resident_admin.keyboards.res_admin_reply import res_admin_keyboard
 from utils.filters import ChatTypeFilter, IsGroupAdmin, RESIDENT_ADMIN_CHAT_ID
 from aiogram.fsm.context import FSMContext
@@ -50,6 +50,12 @@ async def process_phone_or_card(message: Message, state: FSMContext):
     # Проверка формата номера карты (6 цифр, с пробелом или без)
     card_number_pattern = r'^\d{3}\s?\d{3}$'
 
+    # Создаём инлайн-клавиатуру для выбора типа операции
+    transaction_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Начисление", callback_data="transaction_accrue")],
+        [InlineKeyboardButton(text="Списание", callback_data="transaction_deduct")]
+    ])
+
     # Форматируем входные данные
     if re.match(phone_pattern, input_text):
         phone_number = input_text.replace('+', '')  # Убираем + для единообразия
@@ -58,18 +64,32 @@ async def process_phone_or_card(message: Message, state: FSMContext):
         if user_data and user_data.get('tg_id'):
             card_number = await get_card_number_by_user(user_data['tg_id'])
             if card_number:
-                # Сохраняем данные в состоянии
-                await state.update_data(user_data=user_data, card_number=card_number)
+                # Получаем card_id
+                card_id = await get_card_id_by_tg_id(user_data['tg_id'])
+                if card_id is None:
+                    await message.answer(
+                        "Не удалось получить данные карты. Попробуйте еще раз или введите номер телефона:"
+                    )
+                    await state.set_state(TransactionFSM.number)
+                    return
                 # Генерируем изображение карты
                 card_data = await fetch_loyalty_card(user_data['tg_id'])
                 if card_data and card_data.get('card_image'):
+                    # Сохраняем данные в состоянии
+                    await state.update_data(
+                        user_data=user_data,
+                        card_number=card_number,
+                        card_id=card_id
+                    )
+                    # Отправляем изображение карты отдельно
                     await message.answer_photo(
                         photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
-                        caption=(
-                            f"Карта найдена: {card_number} "
-                            f"(Клиент: {user_data['user_first_name']} {user_data['user_last_name']}).\n"
-                            f"Выберите тип транзакции (начисление или списание):"
-                        )
+                        caption=f"Карта найдена: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                    )
+                    # Отправляем сообщение с выбором типа операции
+                    await message.answer(
+                        "Выберите тип операции:",
+                        reply_markup=transaction_keyboard
                     )
                     await state.set_state(TransactionFSM.transaction_type)
                 else:
@@ -92,18 +112,32 @@ async def process_phone_or_card(message: Message, state: FSMContext):
         logger.info(f"Processing card_number: {card_number}")
         user_data = await find_user_by_card_number(card_number)
         if user_data and user_data.get('tg_id'):
-            # Сохраняем данные в состоянии
-            await state.update_data(user_data=user_data, card_number=card_number)
+            # Получаем card_id
+            card_id = await get_card_id_by_tg_id(user_data['tg_id'])
+            if card_id is None:
+                await message.answer(
+                    "Не удалось получить данные карты. Попробуйте еще раз или введите номер телефона:"
+                )
+                await state.set_state(TransactionFSM.number)
+                return
             # Генерируем изображение карты
             card_data = await fetch_loyalty_card(user_data['tg_id'])
             if card_data and card_data.get('card_image'):
+                # Сохраняем данные в состоянии
+                await state.update_data(
+                    user_data=user_data,
+                    card_number=card_number,
+                    card_id=card_id
+                )
+                # Отправляем изображение карты отдельно
                 await message.answer_photo(
                     photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
-                    caption=(
-                        f"Карта найдена: {card_number} "
-                        f"(Клиент: {user_data['user_first_name']} {user_data['user_last_name']}).\n"
-                        f"Выберите тип транзакции (начисление или списание):"
-                    )
+                    caption=f"Карта найдена: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                )
+                # Отправляем сообщение с выбором типа операции
+                await message.answer(
+                    "Выберите тип операции:",
+                    reply_markup=transaction_keyboard
                 )
                 await state.set_state(TransactionFSM.transaction_type)
             else:

@@ -88,3 +88,24 @@ async def get_card_number_by_user(tg_id: int) -> str | None:
     except aiohttp.ClientError as e:
         logger.error(f"Error fetching card number for tg_id={tg_id}: {e}")
         return None
+
+
+async def get_card_id_by_tg_id(tg_id: int) -> int | None:
+    """Получение ID карты по tg_id через API."""
+    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+    url = f"{url_loyalty}{tg_id}/card-id/"
+
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    card_id = data.get('card_id')
+                    logger.info(f"Successfully fetched card_id={card_id} for tg_id={tg_id}")
+                    return card_id
+                else:
+                    logger.warning(f"Failed to fetch card_id for tg_id={tg_id}, status={resp.status}")
+                    return None
+    except aiohttp.ClientError as e:
+        logger.error(f"Error fetching card_id for tg_id={tg_id}: {e}")
+        return None
