@@ -1,8 +1,8 @@
 import logging
 
 import aiohttp
-from aiogram import Router, types
-from aiogram.types import Message, FSInputFile
+from aiogram import Router, types, F
+from aiogram.types import Message
 from aiogram.filters import CommandStart
 from aiohttp import ClientConnectorError, ServerTimeoutError
 from aiogram.fsm.context import FSMContext
@@ -191,17 +191,13 @@ async def process_choice(callback: types.CallbackQuery, state: FSMContext):
         except Exception as e:
             logger.exception("Сбой при отправке подписок")
 
-        menu_icon = FSInputFile("static/menu_icon.png")
-
         interests_text = (
-            "Супер! Мы запомнили твои интересы.\n\n"
-            "Ты всегда можешь их изменить в личном кабинете.\n"
-            "Для вызова главного меню ты всегда можешь воспользоваться волшебной иконкой в панели меню."
+            "Супер! Мы запомнили твои интересы. Ты всегда можешь изменить их в личном кабинете. "
+            "Воспользуйся командой /help, если хочешь разобраться, как здесь всё устроено."
         )
 
-        await callback.message.answer_photo(
-            photo=menu_icon,
-            caption=interests_text,
+        await callback.message.answer(
+            text=interests_text,
             parse_mode="HTML",
             reply_markup=main_kb
         )
@@ -222,3 +218,21 @@ async def process_choice(callback: types.CallbackQuery, state: FSMContext):
             await callback.message.edit_reply_markup(reply_markup=new_markup)
 
     await callback.answer()
+
+
+@start_router.message(F.text == "/help")
+async def help_command(message: Message):
+    help_text = (
+    "👋 *Привет!* Я помогу тебе понять, как пользоваться ботом.\n\n"
+    "*Что ты можешь сделать прямо сейчас:*\n\n"
+    "▫️ */start* — *начать заново*, если что-то пошло не так.\n\n"
+    "▫️ *Зайти в Личный кабинет*, где собраны твои основные настройки:\n"
+    "  ▪️ *Мои данные* — изменить информацию о себе.\n"
+    "  ▪️ *Мои подписки* — посмотреть и обновить список интересов.\n"
+    "  ▪️ *Мои бонусы* — узнать, сколько бонусов ты уже накопил.\n\n"
+    "▫️ *Нажать «Открыть приложение»*, чтобы попасть в Mini-App *«Дизайн Завод»* — "
+    "там тебя ждут *афиша событий*, *тематические маршруты*, *квесты* и вся информация о *наших резидентах*.\n"
+    "А также твои персональные бонусы, подарки и невероятные аватары! 🤩"
+    )
+    
+    await message.answer(help_text, parse_mode="Markdown")

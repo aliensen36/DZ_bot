@@ -109,33 +109,6 @@ async def user_data_inline_kb() -> InlineKeyboardMarkup:
 
     return builder.as_markup()
 
-
-async def bonus_data_inline_kb() -> InlineKeyboardMarkup:
-    """
-    Создаёт и возвращает инлайн-клавиатуру с кнопками для отображения пользовательских данных, подписок и возврата в главное меню.
-    Возвращает:
-        InlineKeyboardMarkup: Объект инлайн-клавиатуры с тремя кнопками:
-            - "Мои данные"
-            - "Мои подписки"
-            - "Назад в главное меню"
-    """
-
-    builder = InlineKeyboardBuilder()
-
-    buttons = [
-         InlineKeyboardButton(text="Мои данные",
-                             callback_data="my_data"),
-        InlineKeyboardButton(text="Мои подписки",
-                             callback_data="my_subscriptions"),
-        InlineKeyboardButton(text="Назад в главное меню",
-                             callback_data="back_to_main")
-        ]
-    builder.add(*buttons)
-    builder.adjust(1)
-
-    return builder.as_markup()
-
-
 async def get_back_inline_kb() -> InlineKeyboardMarkup:
     """
     Асинхронная функция для создания инлайн-клавиатуры с одной кнопкой "Вернуться".
