@@ -13,6 +13,7 @@ from aiogram.enums import ParseMode
 
 from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
+from admin.handlers.event_handler import admin_event_router
 from cmds.bot_cmds_list import bot_cmds_list
 from client.handlers.profile_handler import profile_router
 from client.handlers.start_handler import start_router
@@ -54,6 +55,8 @@ def setup_routers(dp: Dispatcher) -> None:
         admin_router,
         admin_mailing_router,
         admin_resident_router,
+        admin_event_router,
+        
         # Резидентские роуетры
         res_admin_router
     )
