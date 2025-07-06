@@ -14,13 +14,12 @@ from aiogram import F
 import aiohttp
 
 from data.config import config_settings
-from data.url import url_subscription, url_loyalty
+from data.url import url_subscription
 from client.keyboards.inline import (
     get_profile_inline_kb,
     build_interests_keyboard,
     no_user_data_inline_kb,
     user_data_inline_kb,
-    bonus_data_inline_kb,
     subscription_data_inline_kb,
     get_subscriptions_name
 )
