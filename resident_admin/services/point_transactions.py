@@ -1,6 +1,6 @@
 from client.services.loyalty import fetch_loyalty_card
 from data.config import config_settings
-from data.url import url_users, url_point_transactions_acrue, url_loyalty, url_point_transactions_deduct, url_resident
+from data.url import url_users, url_loyalty, url_point_transactions_deduct, url_resident
 import aiohttp
 
 import logging
@@ -108,4 +108,50 @@ async def get_card_id_by_tg_id(tg_id: int) -> int | None:
                     return None
     except aiohttp.ClientError as e:
         logger.error(f"Error fetching card_id for tg_id={tg_id}: {e}")
+        return None
+
+
+async def get_resident_id_by_user_id(user_id: int) -> int | None:
+    """Получение resident_id по user_id через API."""
+    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(f"{url_resident}?user={user_id}", headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data and isinstance(data, list) and len(data) > 0:
+                        resident_id = data[0].get('id')
+                        logger.info(f"Successfully fetched resident_id={resident_id} for user_id={user_id}")
+                        return resident_id
+                    else:
+                        logger.warning(f"No resident found for user_id={user_id}")
+                        return None
+                else:
+                    logger.warning(f"Failed to fetch resident_id for user_id={user_id}, status={resp.status}")
+                    return None
+    except aiohttp.ClientError as e:
+        logger.error(f"Error fetching resident_id for user_id={user_id}: {e}")
+        return None
+
+
+async def get_user_id_by_tg_id(tg_id: int) -> int | None:
+    """Получение user_id по tg_id через API."""
+    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+    try:
+        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
+            async with session.get(f"{url_users}?tg_id={tg_id}", headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    if data and isinstance(data, list) and len(data) > 0:
+                        user_id = data[0].get('id')
+                        logger.info(f"Successfully fetched user_id={user_id} for tg_id={tg_id}")
+                        return user_id
+                    else:
+                        logger.warning(f"No user found for tg_id={tg_id}")
+                        return None
+                else:
+                    logger.warning(f"Failed to fetch user_id for tg_id={tg_id}, status={resp.status}")
+                    return None
+    except aiohttp.ClientError as e:
+        logger.error(f"Error fetching user_id for tg_id={tg_id}: {e}")
         return None

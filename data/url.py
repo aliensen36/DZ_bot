@@ -7,6 +7,6 @@ url_loyalty = f"{base_url}/loyalty-cards/"
 url_subscription = f"{base_url}/subscriptions/"
 url_resident = f"{base_url}/residents/"
 url_category = f"{base_url}/categories/"
-url_point_transactions_acrue = f'{base_url}/points-transactions/accrue/'
+url_point_transactions_accrue = f'{base_url}/points-transactions/accrue/'
 url_point_transactions_deduct = f"{base_url}/points-transactions/deduct/"
 
