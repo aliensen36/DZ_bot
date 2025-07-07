@@ -9,4 +9,5 @@ url_resident = f"{base_url}/residents/"
 url_category = f"{base_url}/categories/"
 url_point_transactions_accrue = f'{base_url}/points-transactions/accrue/'
 url_point_transactions_deduct = f"{base_url}/points-transactions/deduct/"
+url_event = f"{base_url}/events/"
 
