@@ -58,6 +58,7 @@ def edit_event_keyboard():
     builder.button(text="Изменить дату начала")
     builder.button(text="Изменить дату окончания")
     builder.button(text="Изменить локацию")
+    builder.button(text="Изменить ссылку")
     builder.button(text="Назад")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)

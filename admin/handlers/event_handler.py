@@ -1,7 +1,6 @@
 import aiohttp
-import base64
+import re
 import logging
-from io import BytesIO
 from datetime import datetime, timezone
 from aiogram import F, Router
 from aiogram.fsm.state import StatesGroup, State
@@ -23,6 +22,13 @@ admin_event_router.message.filter(
     IsGroupAdmin([ADMIN_CHAT_ID], show_message=False)
 )
 
+URL_PATTERN = re.compile(
+    r'^(https?://)?'                  # optional http or https
+    r'([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}' # domain
+    r'(:\d+)?'                        # optional port
+    r'(/[\w\-._~:/?#[\]@!$&\'()*+,;=]*)?$'  # path + query
+)
+
 # Состояния для FSM
 class EventForm(StatesGroup):
     waiting_for_title = State()
@@ -32,6 +38,7 @@ class EventForm(StatesGroup):
     waiting_for_start_date = State()
     waiting_for_end_date = State()
     waiting_for_location = State()
+    waiting_for_url = State()
 
 class EditEventForm(StatesGroup):
     choosing_field = State()
@@ -42,6 +49,7 @@ class EditEventForm(StatesGroup):
     waiting_for_start_date = State()
     waiting_for_end_date = State()
     waiting_for_location = State()
+    waiting_for_url = State()
 
 
 # Функция для форматирования даты и времени
@@ -206,14 +214,29 @@ async def process_end_date(message: Message, state: FSMContext):
         await message.answer("Неверный формат даты и времени. Пожалуйста, используйте формат YYYY-MM-DD HH:MM (например, 2025-07-06 15:30).", reply_markup=cancel_keyboard())
 
 
-# Хендлеры для обработки места проведения мероприятия и создания мероприятия
+# Хендлеры для обработки места проведения мероприятия
 @admin_event_router.message(StateFilter(EventForm.waiting_for_location))
-async def process_event_location_and_create(message: Message, state: FSMContext, bot):
+async def process_event_location(message: Message, state: FSMContext):
     location = message.text.strip()
     if not location:
         await message.answer("Место проведения не может быть пустым. Пожалуйста, введите место проведения мероприятия:", reply_markup=cancel_keyboard())
         return
     await state.update_data(location=location)
+    await state.set_state(EventForm.waiting_for_url)
+    await message.answer("Введите ссылку для регистрации на мероприятие:", reply_markup=cancel_keyboard())
+
+
+# Хендлеры для обработки места проведения мероприятия и создания мероприятия
+@admin_event_router.message(StateFilter(EventForm.waiting_for_url))
+async def process_event_url_and_create(message: Message, state: FSMContext, bot):
+    url = message.text.strip()
+    if not url:
+        await message.answer("Ссылка для регистрации на мероприятие не может быть пустой. Пожалуйста, введите ссылку:", reply_markup=cancel_keyboard())
+        return
+    if not URL_PATTERN.match(url):
+        await message.answer("Неверный формат ссылки. Пожалуйста, введите корректную ссылку для регистрации:", reply_markup=cancel_keyboard())
+        return
+    await state.update_data(url=url)
     data = await state.get_data()
     event_data = {
         "title": data.get("title"),
@@ -221,7 +244,8 @@ async def process_event_location_and_create(message: Message, state: FSMContext,
         "info": data.get("info"),
         "start_date": data.get("start_date").isoformat(),
         "end_date": data.get("end_date").isoformat(),
-        "location": data.get("location")
+        "location": data.get("location"),
+        "url": data.get("url"),
     }
     photo_file_id = data.get("photo")
     created_event = await create_new_event(event_data, photo_file_id, bot)
@@ -235,7 +259,8 @@ async def process_event_location_and_create(message: Message, state: FSMContext,
             f"Информация: {event_data['info']}\n"
             f"Дата начала: {format_datetime(event_data.get('start_date'))}\n"
             f"Дата окончания: {format_datetime(event_data.get('end_date'))}\n"
-            f"Место: {event_data['location']}"
+            f"Место: {event_data['location']}\n"
+            f"Ссылка для регистрации: {event_data['url']}"
             ),
             photo=created_event.get("photo", None),
             reply_markup=events_management_keyboard(),
@@ -362,7 +387,8 @@ async def edit_event_select(message: Message, state: FSMContext):
         f"Информация: {event['info']}\n"
         f"Дата начала: {format_datetime(event.get('start_date'))}\n"
         f"Дата окончания: {format_datetime(event.get('end_date'))}\n"
-        f"Место: {event['location']}"
+        f"Место: {event['location']}\n"
+        f"Ссылка для регистрации: {event.get('url')}"
     )
 
     await message.answer_photo(
@@ -371,7 +397,7 @@ async def edit_event_select(message: Message, state: FSMContext):
         reply_markup=edit_event_keyboard()
     )
 
-
+# Хендлеры для выбора поля для редактирования мероприятия
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить название")
 async def edit_event_title(message: Message, state: FSMContext):
     await message.answer("Введите новое название:")
@@ -379,35 +405,40 @@ async def edit_event_title(message: Message, state: FSMContext):
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить фото")
 async def edit_event_photo(message: Message, state: FSMContext):
-    await message.answer("Отправьте новое фото события:")
+    await message.answer("Отправьте новое фото:")
     await state.set_state(EditEventForm.waiting_for_photo)
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить описание")
 async def edit_event_description(message: Message, state: FSMContext):
-    await message.answer("Введите новое описание события:")
+    await message.answer("Введите новое описание:")
     await state.set_state(EditEventForm.waiting_for_description)
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить информацию")
 async def edit_event_info(message: Message, state: FSMContext):
-    await message.answer("Введите новую информацию о событии:")
+    await message.answer("Введите новую информацию:")
     await state.set_state(EditEventForm.waiting_for_info)
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить дату начала")
 async def edit_event_start_date(message: Message, state: FSMContext):
-    await message.answer("Введите новую дату начала события (в формате ГГГГ-ММ-ДД ЧЧ:ММ):")
+    await message.answer("Введите новую дату начала (в формате ГГГГ-ММ-ДД ЧЧ:ММ):")
     await state.set_state(EditEventForm.waiting_for_start_date)
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить дату окончания")
 async def edit_event_end_date(message: Message, state: FSMContext):
-    await message.answer("Введите новую дату окончания события (в формате ГГГГ-ММ-ДД ЧЧ:ММ):")
+    await message.answer("Введите новую дату окончания (в формате ГГГГ-ММ-ДД ЧЧ:ММ):")
     await state.set_state(EditEventForm.waiting_for_end_date)
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить локацию")
 async def edit_event_location(message: Message, state: FSMContext):
-    await message.answer("Введите новую локацию события:")
+    await message.answer("Введите новую локацию:")
     await state.set_state(EditEventForm.waiting_for_location)
 
+@admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить ссылку")
+async def edit_event_location(message: Message, state: FSMContext):
+    await message.answer("Введите новую ссылку:")
+    await state.set_state(EditEventForm.waiting_for_location)
 
+# Хендлеры для обработки изменений в мероприятии
 @admin_event_router.message(EditEventForm.waiting_for_title)
 async def process_event_title(message: Message, state: FSMContext):
     new_title = message.text.strip()
@@ -417,7 +448,7 @@ async def process_event_title(message: Message, state: FSMContext):
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к событию.")
+        await message.answer("Ошибка доступа к мероприятию.")
         return
     await update_event(event_id=event["id"], updated_fields={"title": new_title})
     event["title"] = new_title
@@ -431,7 +462,7 @@ async def process_event_photo(message: Message, state: FSMContext):
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к событию.")
+        await message.answer("Ошибка доступа к мероприятию.")
         return
 
     if message.photo:
@@ -442,7 +473,7 @@ async def process_event_photo(message: Message, state: FSMContext):
         await update_event(event_id=event["id"], updated_fields={"photo": photo_file_id})
         event["photo"] = photo_file_id
         await state.update_data(event=event)
-        await message.answer("Фото события обновлено.", reply_markup=edit_event_keyboard())
+        await message.answer("Фото мероприятия обновлено.", reply_markup=edit_event_keyboard())
     else:
         await message.answer("Пожалуйста, отправьте изображение.")
 
@@ -458,13 +489,13 @@ async def process_event_description(message: Message, state: FSMContext):
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к событию.")
+        await message.answer("Ошибка доступа к мероприятию.")
         return
 
     await update_event(event_id=event["id"], updated_fields={"description": new_description})
     event["description"] = new_description
     await state.update_data(event=event)
-    await message.answer("Описание события обновлено.", reply_markup=edit_event_keyboard())
+    await message.answer("Описание мероприятия обновлено.", reply_markup=edit_event_keyboard())
 
     await state.set_state(EditEventForm.choosing_field)
 
@@ -478,13 +509,13 @@ async def process_event_info(message: Message, state: FSMContext):
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к событию.")
+        await message.answer("Ошибка доступа к мероприятию.")
         return
 
     await update_event(event_id=event["id"], updated_fields={"info": new_info})
     event["info"] = new_info 
     await state.update_data(event=event)
-    await message.answer("Информация о событии обновлена.", reply_markup=edit_event_keyboard())
+    await message.answer("Информация о мероприятии обновлена.", reply_markup=edit_event_keyboard())
 
     await state.set_state(EditEventForm.choosing_field)
 
@@ -500,7 +531,7 @@ async def process_event_start_date(message: Message, state: FSMContext):
         data = await state.get_data()
         event = data.get("event")
         if not event:
-            await message.answer("Ошибка доступа к событию.")
+            await message.answer("Ошибка доступа к мероприятию.")
             return
 
         await update_event(event_id=event["id"], updated_fields={"start_date": new_start_date})
@@ -520,7 +551,7 @@ async def process_event_end_date(message: Message, state: FSMContext):
         data = await state.get_data()
         event = data.get("event")
         if not event:
-            await message.answer("Ошибка доступа к событию.")
+            await message.answer("Ошибка доступа к мероприятию.")
             return
 
         start_date_str = event.get("start_date")
@@ -549,13 +580,37 @@ async def process_event_location(message: Message, state: FSMContext):
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к событию.")
+        await message.answer("Ошибка доступа к мероприятию.")
         return
 
     await update_event(event_id=event["id"], updated_fields={"location": new_location})
     event["location"] = new_location
     await state.update_data(event=event)
     await message.answer("Локация обновлена.", reply_markup=edit_event_keyboard())
+
+    await state.set_state(EditEventForm.choosing_field)
+
+
+@admin_event_router.message(EditEventForm.waiting_for_url)
+async def process_event_url(message: Message, state: FSMContext):
+    new_url = message.text.strip()
+    if not new_url:
+        await message.answer("Ссылка не может быть пустой.")
+        return
+    if not URL_PATTERN.match(new_url):
+        await message.answer("Неверный формат ссылки. Пожалуйста, введите корректную ссылку для регистрации:", reply_markup=cancel_keyboard())
+        return
+    
+    data = await state.get_data()
+    event = data.get("event")
+    if not event:
+        await message.answer("Ошибка доступа к мероприятию.")
+        return
+
+    await update_event(event_id=event["id"], updated_fields={"location": new_url})
+    event["url"] = new_url
+    await state.update_data(event=event)
+    await message.answer("Ссылка обновлена.", reply_markup=edit_event_keyboard())
 
     await state.set_state(EditEventForm.choosing_field)
 
@@ -591,6 +646,7 @@ async def delete_event_start(message: Message):
         reply_markup=builder.as_markup(resize_keyboard=True)
     )
 
+# Хендлер для выбора мероприятия для удаления
 @admin_event_router.message(F.text.startswith("❌ "))
 async def delete_event_select(message: Message, state: FSMContext):
     event_title = message.text[2:].strip()
@@ -629,7 +685,7 @@ async def confirm_delete_event(message: Message, state: FSMContext):
     event = data.get("event")
 
     if not event:
-        await message.answer("Ошибка: событие не найдено.")
+        await message.answer("Ошибка: мероприятие не найдено.")
         return
 
     success = await delete_event(event_id=event["id"])
