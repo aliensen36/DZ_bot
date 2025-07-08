@@ -95,18 +95,6 @@ async def handle_profile(message: Message):
 # Хендлер для кнопки "Мои данные"
 @profile_router.callback_query(F.data == "my_data")
 async def my_data_handler(callback: CallbackQuery):
-    """
-    Обрабатывает запрос пользователя на просмотр своих данных профиля в системе лояльности.
-    Аргументы:
-        callback (CallbackQuery): Объект запроса обратного вызова от пользователя Telegram.
-    Описание:
-        - Получает идентификатор пользователя из запроса.
-        - Проверяет наличие карты лояльности пользователя.
-        - Если карта не найдена, отправляет сообщение о незарегистрированном пользователе с соответствующей клавиатурой.
-        - Если карта найдена, формирует и отправляет сообщение с персональными данными пользователя и клавиатурой.
-        - Обрабатывает исключение TelegramBadRequest, игнорируя ошибку "message is not modified" и логируя другие ошибки.
-    """
-
     user_id = callback.from_user.id
     await callback.answer()
 
@@ -129,6 +117,22 @@ async def my_data_handler(callback: CallbackQuery):
             )
             return
 
+        # Проверка: все ли поля пусты
+        loyalty_fields = [
+            user_data.get("user_first_name"),
+            user_data.get("user_last_name"),
+            user_data.get("birth_date"),
+            user_data.get("phone_number"),
+            user_data.get("email"),
+        ]
+
+        if all(field is None or field == "" for field in loyalty_fields):
+            await callback.message.answer(
+                "Вы не зарегистрированы в системе лояльности",
+                reply_markup=await no_user_data_inline_kb()
+            )
+            return
+
         # Формируем сообщение с данными пользователя
         user_data_message = (
             f"<b>Ваши данные:</b>\n\n"
@@ -136,7 +140,7 @@ async def my_data_handler(callback: CallbackQuery):
             f"Фамилия: {user_data.get('user_last_name', 'Не указано')}\n"
             f"Дата рождения: {user_data.get('birth_date', 'Не указано')}\n"
             f"Телефон: {user_data.get('phone_number', 'Не указано')}\n"
-            f"Email: {user_data.get('email', 'Не указано')}\n\n"
+            f"Email: {user_data.get('email', 'Не указано')}\n"
         )
 
         await callback.message.answer(
@@ -160,6 +164,7 @@ async def my_data_handler(callback: CallbackQuery):
             "Произошла ошибка. Попробуйте позже.",
             reply_markup=await get_profile_inline_kb()
         )
+
 
 
 # Обработчик: Выбор изменения данных пользователя
