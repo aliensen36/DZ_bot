@@ -1,10 +1,11 @@
 import aiohttp
 import re
 import logging
+import os
 from datetime import datetime, timezone
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, ReplyKeyboardRemove
+from aiogram.types import Message
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
@@ -12,6 +13,7 @@ from data.config import config_settings
 from admin.keyboards.admin_reply import events_management_keyboard, admin_keyboard, cancel_keyboard, edit_event_keyboard
 from data.url import url_event
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
+from utils.services import download_photo_from_telegram
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -80,34 +82,40 @@ async def back_to_admin_menu(message: Message):
 # Функция для создания нового мероприятия
 async def create_new_event(event_data: dict, photo_file_id: str = None, bot=None):
     url = f"{url_event}"
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    payload = event_data.copy()
+    headers = {
+        "X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()
+    }
 
-    if photo_file_id:
-        payload["photo"] = photo_file_id
-        print(f"Using Telegram file_id for photo: {photo_file_id}")
-    else:
-        payload["photo"] = ""
+    data = event_data.copy()
+    form_data = aiohttp.FormData()
+    for key, value in data.items():
+        form_data.add_field(key, str(value))
+
+    try:
+        photo_content = await download_photo_from_telegram(bot, photo_file_id)
+        form_data.add_field(
+            "photo",
+            photo_content,
+            filename=f"event_{photo_file_id}.jpg",
+            content_type="image/jpeg"
+        )
+    except Exception as e:
+        print(f"Ошибка загрузки фото: {e}")
+        raise Exception(f"Не удалось загрузить фото: {str(e)}")
 
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                print(f"Create event status: {response.status}")
-                print(f"Payload sent: {payload}")
-                print(f"Response headers: {response.headers}")
+            async with session.post(url, headers=headers, data=form_data) as response:
+                print(f"API response: status={response.status}, body={await response.text()}") # Для отладки
                 if response.status == 201:
                     return await response.json()
                 else:
-                    error_text = await response.text()
-                    print(f"Error creating event: {error_text}")
+                    print(f"Error creating event: {response.status} - {await response.text()}")
                     return None
-    except aiohttp.ClientError as e:
-        print(f"HTTP Client Error creating event: {e}")
-        return None
     except Exception as e:
-        print(f"Unexpected error creating event: {e}")
+        print(f"Unexpected error: {e}")
         return None
-
+    
 
 # Хендлеры для управления мероприятиями
 @admin_event_router.message(F.text == "🎉 Мероприятия")
@@ -226,7 +234,7 @@ async def process_event_location(message: Message, state: FSMContext):
     await message.answer("Введите ссылку для регистрации на мероприятие:", reply_markup=cancel_keyboard())
 
 
-# Хендлеры для обработки места проведения мероприятия и создания мероприятия
+# Хендлеры для ссылки регистрации на мероприятие и создания мероприятия
 @admin_event_router.message(StateFilter(EventForm.waiting_for_url))
 async def process_event_url_and_create(message: Message, state: FSMContext, bot):
     url = message.text.strip()
@@ -248,30 +256,46 @@ async def process_event_url_and_create(message: Message, state: FSMContext, bot)
         "url": data.get("url"),
     }
     photo_file_id = data.get("photo")
-    created_event = await create_new_event(event_data, photo_file_id, bot)
-    if created_event:
 
-        await message.answer_photo(
+    try:
+        created_event = await create_new_event(event_data, photo_file_id, bot)
+        if created_event:
+
             caption = (
-            f"Мероприятие успешно создано!\n"
-            f"Название: {event_data['title']}\n"
-            f"Описание: {event_data['description']}\n"
-            f"Информация: {event_data['info']}\n"
-            f"Дата начала: {format_datetime(event_data.get('start_date'))}\n"
-            f"Дата окончания: {format_datetime(event_data.get('end_date'))}\n"
-            f"Место: {event_data['location']}\n"
-            f"Ссылка для регистрации: {event_data['url']}"
-            ),
-            photo=created_event.get("photo", None),
-            reply_markup=events_management_keyboard(),
-        )
-        await state.clear()
-    else:
+                f"Мероприятие успешно создано!\n"
+                f"Название: {event_data['title']}\n"
+                f"Описание: {event_data['description']}\n"
+                f"Информация: {event_data['info']}\n"
+                f"Дата начала: {format_datetime(event_data.get('start_date'))}\n"
+                f"Дата окончания: {format_datetime(event_data.get('end_date'))}\n"
+                f"Место: {event_data['location']}\n"
+                f"Ссылка для регистрации: {event_data['url']}"
+            )
+
+            photo_url = created_event.get("photo")
+            if photo_url:
+                await message.answer_photo(
+                    photo=photo_url,
+                    caption=caption,
+                    parse_mode="Markdown",
+                    reply_markup=events_management_keyboard(),
+                )
+            await state.clear()
+        else:
+            await message.answer(
+                "Произошла ошибка при создании мероприятия. Пожалуйста, проверьте данные и попробуйте еще раз.",
+                reply_markup=events_management_keyboard()
+            )
+            await state.clear()
+
+    except Exception as e:
+        print(f"Ошибка в process_event_url_and_create: {str(e)}")
         await message.answer(
-            "Произошла ошибка при создании мероприятия. Пожалуйста, проверьте данные и попробуйте еще раз.",
+            f"Ошибка. Попробуйте еще раз.",
             reply_markup=events_management_keyboard()
         )
         await state.clear()
+
 
 # Получение списка мероприятий
 async def fetch_events() -> list:
@@ -302,48 +326,38 @@ async def get_event_by_title(title: str) -> dict:
 
     
 # Функция для обновления мероприятия
-async def update_event(event_id: int, updated_fields: dict) -> bool:
-    url = f"{url_event.rstrip('/')}/{event_id}/"
+async def update_event(event_id: int, updated_fields: dict, bot: Bot = None):
+    url = f"{url_event}{event_id}/"
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    logger.info(f"Updating event data for event_id={event_id} with fields={updated_fields}, url={url}")
+    form_data = aiohttp.FormData()
+
+    for key, value in updated_fields.items():
+        if key == "photo" and value and bot:
+            try:
+                photo_content = await download_photo_from_telegram(bot, value)
+                form_data.add_field(
+                    "photo",
+                    photo_content,
+                    filename=f"event_{event_id}.jpg",
+                    content_type="image/jpeg"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка загрузки фото: {e}")
+                raise
+        else:
+            form_data.add_field(key, str(value))
 
     try:
-        # Получаем текущие данные мероприятия
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
-            async with session.get(url, headers=headers) as resp_get:
-                if resp_get.status != 200:
-                    logger.error(f"Failed to fetch current event data for event_id={event_id}: status={resp_get.status}")
-                    return False
-                current_data = await resp_get.json()
-
-                # Сравниваем текущие данные с updated_fields
-                update_needed = False
-                for key, value in updated_fields.items():
-                    if value is not None and current_data.get(key) != value:
-                        update_needed = True
-                        break
-
-                if not update_needed:
-                    logger.info(f"No changes needed for event_id={event_id}")
-                    return True
-
-                # Выполняем обновление только если есть изменения
-                async with session.patch(url, json=updated_fields, headers=headers) as resp:
-                    response_text = await resp.text()
-                    if resp.status in [200, 204]:
-                        logger.info(f"Event data updated for event_id={event_id}, status={resp.status}")
-                        return True
-                    else:
-                        logger.error(
-                            f"Failed to update event data for event_id={event_id}: status={resp.status}, response={response_text}"
-                        )
-                        return False
-
-    except aiohttp.ClientError as e:
-        logger.exception(f"Client error while updating event data for event_id={event_id}: {str(e)}")
-        return False
+        async with aiohttp.ClientSession() as session:
+            async with session.patch(url, headers=headers, data=form_data) as response:
+                response_text = await response.text()
+                logger.info(f"API update response: status={response.status}, body={response_text}")
+                if response.status == 200:
+                    return await response.json()
+                else:
+                    raise Exception(f"Failed to update event data for event_id={event_id}: status={response.status}, response={response_text}")
     except Exception as e:
-        logger.exception(f"Unexpected error while updating event data for event_id={event_id}: {str(e)}")
+        logger.error(f"Ошибка обновления мероприятия {event_id}: {e}")
         return False
 
 # Хендлеры для редактирования мероприятий
@@ -390,12 +404,26 @@ async def edit_event_select(message: Message, state: FSMContext):
         f"Место: {event['location']}\n"
         f"Ссылка для регистрации: {event.get('url')}"
     )
-
-    await message.answer_photo(
-        caption=current_event_text,
-        photo=event.get("photo", None),
-        reply_markup=edit_event_keyboard()
-    )
+    photo_url = event.get("photo")
+    if photo_url:
+        try:
+            await message.answer_photo(
+                photo=photo_url,
+                caption=current_event_text,
+                parse_mode="Markdown",
+                reply_markup=edit_event_keyboard()
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отправки фото: {e}")
+            await message.answer(
+                current_event_text + "\n\n(Фото недоступно)",
+                reply_markup=edit_event_keyboard()
+            )
+    else:
+        await message.answer(
+            current_event_text + "\n\n(Фото отсутствует)",
+            reply_markup=edit_event_keyboard()
+        )
 
 # Хендлеры для выбора поля для редактирования мероприятия
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить название")
@@ -443,81 +471,102 @@ async def edit_event_location(message: Message, state: FSMContext):
 async def process_event_title(message: Message, state: FSMContext):
     new_title = message.text.strip()
     if not new_title:
-        await message.answer("Название не может быть пустым.")
+        await message.answer("Название не может быть пустым.", reply_markup=cancel_keyboard())
         return
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к мероприятию.")
+        await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+        await state.clear()
         return
-    await update_event(event_id=event["id"], updated_fields={"title": new_title})
-    event["title"] = new_title
-    await state.update_data(event=event)
-    await message.answer("Название мероприятия обновлено.", reply_markup=edit_event_keyboard())
-    await state.set_state(EditEventForm.choosing_field)
-
+    try:
+        await update_event(event_id=event["id"], updated_fields={"title": new_title}, bot=None)
+        event["title"] = new_title
+        await state.update_data(event=event)
+        await message.answer("Название мероприятия обновлено.", reply_markup=edit_event_keyboard())
+        await state.set_state(EditEventForm.choosing_field)
+    except Exception as e:
+        logger.error(f"Ошибка обновления названия: {e}")
+        await message.answer(f"Ошибка. Попробуйте снова.", reply_markup=edit_event_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_photo)
-async def process_event_photo(message: Message, state: FSMContext):
+async def process_event_photo(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к мероприятию.")
+        await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+        await state.clear()
         return
 
     if message.photo:
         photo_file_id = message.photo[-1].file_id
         if message.photo[-1].file_size > 10 * 1024 * 1024:
-            await message.answer("Фото слишком большое. Максимум 10 МБ.")
+            await message.answer("Фото слишком большое. Максимум 10 МБ.", reply_markup=cancel_keyboard())
             return
-        await update_event(event_id=event["id"], updated_fields={"photo": photo_file_id})
-        event["photo"] = photo_file_id
-        await state.update_data(event=event)
-        await message.answer("Фото мероприятия обновлено.", reply_markup=edit_event_keyboard())
+        try:
+            updated_event = await update_event(event_id=event["id"], updated_fields={"photo": photo_file_id}, bot=bot)
+            if updated_event and isinstance(updated_event, dict):
+                event["photo"] = updated_event.get("photo")
+                await state.update_data(event=event)
+                await message.answer("Фото мероприятия обновлено.", reply_markup=edit_event_keyboard())
+                await state.set_state(EditEventForm.choosing_field)
+            else:
+                logger.error(f"Ошибка: update_event вернул {updated_event}")
+                await message.answer("Ошибка при обновлении фото. Попробуйте снова.", reply_markup=cancel_keyboard())
+        except Exception as e:
+            logger.error(f"Ошибка обновления фото: {e}")
+            await message.answer(f"Ошибка: {str(e)}. Попробуйте снова.", reply_markup=cancel_keyboard())
     else:
-        await message.answer("Пожалуйста, отправьте изображение.")
+        await message.answer("Пожалуйста, отправьте изображение.", reply_markup=cancel_keyboard())
 
-    await state.set_state(EditEventForm.choosing_field)
 
 @admin_event_router.message(EditEventForm.waiting_for_description)
 async def process_event_description(message: Message, state: FSMContext):
     new_description = message.text.strip()
     if not new_description:
-        await message.answer("Описание не может быть пустым.")
+        await message.answer("Описание не может быть пустым.", reply_markup=cancel_keyboard())
         return
 
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к мероприятию.")
+        await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+        await state.clear()
         return
 
-    await update_event(event_id=event["id"], updated_fields={"description": new_description})
-    event["description"] = new_description
-    await state.update_data(event=event)
-    await message.answer("Описание мероприятия обновлено.", reply_markup=edit_event_keyboard())
-
-    await state.set_state(EditEventForm.choosing_field)
+    try:
+        await update_event(event_id=event["id"], updated_fields={"description": new_description}, bot=None)
+        event["description"] = new_description
+        await state.update_data(event=event)
+        await message.answer("Описание мероприятия обновлено.", reply_markup=edit_event_keyboard())
+        await state.set_state(EditEventForm.choosing_field)
+    except Exception as e:
+        logger.error(f"Ошибка обновления описания: {e}")
+        await message.answer(f"Ошибка. Попробуйте снова.", reply_markup=edit_event_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_info)
 async def process_event_info(message: Message, state: FSMContext):
     new_info = message.text.strip()
     if not new_info:
-        await message.answer("Информация не может быть пустой.")
+        await message.answer("Информация не может быть пустой.", reply_markup=cancel_keyboard())
         return
 
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к мероприятию.")
+        await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+        await state.clear()
         return
 
-    await update_event(event_id=event["id"], updated_fields={"info": new_info})
-    event["info"] = new_info 
-    await state.update_data(event=event)
-    await message.answer("Информация о мероприятии обновлена.", reply_markup=edit_event_keyboard())
-
-    await state.set_state(EditEventForm.choosing_field)
+    try:
+        await update_event(event_id=event["id"], updated_fields={"info": new_info}, bot=None)
+        event["info"] = new_info
+        await state.update_data(event=event)
+        await message.answer("Информация о мероприятии обновлена.", reply_markup=edit_event_keyboard())
+        await state.set_state(EditEventForm.choosing_field)
+    except Exception as e:
+        logger.error(f"Ошибка обновления информации: {e}")
+        await message.answer(f"Ошибка. Попробуйте снова.", reply_markup=edit_event_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_start_date)
 async def process_event_start_date(message: Message, state: FSMContext):
@@ -531,17 +580,17 @@ async def process_event_start_date(message: Message, state: FSMContext):
         data = await state.get_data()
         event = data.get("event")
         if not event:
-            await message.answer("Ошибка доступа к мероприятию.")
+            await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+            await state.clear()
             return
 
-        await update_event(event_id=event["id"], updated_fields={"start_date": new_start_date})
-        event["start_date"] = new_start_date
+        await update_event(event_id=event["id"], updated_fields={"start_date": start_date.isoformat()}, bot=None)
+        event["start_date"] = start_date.isoformat()
         await state.update_data(event=event)
         await message.answer("Дата начала обновлена.", reply_markup=edit_event_keyboard())
-
         await state.set_state(EditEventForm.choosing_field)
     except ValueError:
-        await message.answer("Неверный формат даты. Пример: 2025-07-06 15:30", reply_markup=cancel_keyboard())
+        await message.answer("Неверный формат даты. Пример: 2025-07-09 15:30", reply_markup=cancel_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_end_date)
 async def process_event_end_date(message: Message, state: FSMContext):
@@ -551,68 +600,75 @@ async def process_event_end_date(message: Message, state: FSMContext):
         data = await state.get_data()
         event = data.get("event")
         if not event:
-            await message.answer("Ошибка доступа к мероприятию.")
+            await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+            await state.clear()
             return
 
         start_date_str = event.get("start_date")
         if start_date_str:
-            start_date = datetime.strptime(start_date_str, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            start_date = datetime.fromisoformat(start_date_str.replace("Z", "+00:00"))
             if end_date <= start_date:
                 await message.answer("Дата окончания должна быть позже начала.", reply_markup=cancel_keyboard())
                 return
 
-        await update_event(event_id=event["id"], updated_fields={"end_date": new_end_date})
-        event["end_date"] = new_end_date
+        await update_event(event_id=event["id"], updated_fields={"end_date": end_date.isoformat()}, bot=None)
+        event["end_date"] = end_date.isoformat()
         await state.update_data(event=event)
         await message.answer("Дата окончания обновлена.", reply_markup=edit_event_keyboard())
-
         await state.set_state(EditEventForm.choosing_field)
     except ValueError:
-        await message.answer("Неверный формат даты. Пример: 2025-07-06 15:30", reply_markup=cancel_keyboard())
+        await message.answer("Неверный формат даты. Пример: 2025-07-09 15:30", reply_markup=cancel_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_location)
 async def process_event_location(message: Message, state: FSMContext):
     new_location = message.text.strip()
     if not new_location:
-        await message.answer("Локация не может быть пустой.")
+        await message.answer("Локация не может быть пустой.", reply_markup=cancel_keyboard())
         return
 
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к мероприятию.")
+        await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+        await state.clear()
         return
 
-    await update_event(event_id=event["id"], updated_fields={"location": new_location})
-    event["location"] = new_location
-    await state.update_data(event=event)
-    await message.answer("Локация обновлена.", reply_markup=edit_event_keyboard())
-
-    await state.set_state(EditEventForm.choosing_field)
-
+    try:
+        await update_event(event_id=event["id"], updated_fields={"location": new_location}, bot=None)
+        event["location"] = new_location
+        await state.update_data(event=event)
+        await message.answer("Локация обновлена.", reply_markup=edit_event_keyboard())
+        await state.set_state(EditEventForm.choosing_field)
+    except Exception as e:
+        logger.error(f"Ошибка обновления локации: {e}")
+        await message.answer(f"Ошибка. Попробуйте снова.", reply_markup=edit_event_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_url)
 async def process_event_url(message: Message, state: FSMContext):
     new_url = message.text.strip()
     if not new_url:
-        await message.answer("Ссылка не может быть пустой.")
+        await message.answer("Ссылка не может быть пустой.", reply_markup=cancel_keyboard())
         return
     if not URL_PATTERN.match(new_url):
-        await message.answer("Неверный формат ссылки. Пожалуйста, введите корректную ссылку для регистрации:", reply_markup=cancel_keyboard())
+        await message.answer("Неверный формат ссылки. Пожалуйста, введите корректную ссылку:", reply_markup=cancel_keyboard())
         return
     
     data = await state.get_data()
     event = data.get("event")
     if not event:
-        await message.answer("Ошибка доступа к мероприятию.")
+        await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
+        await state.clear()
         return
 
-    await update_event(event_id=event["id"], updated_fields={"location": new_url})
-    event["url"] = new_url
-    await state.update_data(event=event)
-    await message.answer("Ссылка обновлена.", reply_markup=edit_event_keyboard())
-
-    await state.set_state(EditEventForm.choosing_field)
+    try:
+        await update_event(event_id=event["id"], updated_fields={"url": new_url}, bot=None)
+        event["url"] = new_url
+        await state.update_data(event=event)
+        await message.answer("Ссылка обновлена.", reply_markup=edit_event_keyboard())
+        await state.set_state(EditEventForm.choosing_field)
+    except Exception as e:
+        logger.error(f"Ошибка обновления ссылки: {e}")
+        await message.answer(f"Ошибка. Попробуйте снова.", reply_markup=edit_event_keyboard())
 
 
 async def delete_event(event_id: int) -> bool:
@@ -625,7 +681,7 @@ async def delete_event(event_id: int) -> bool:
     except Exception as e:
         logger.error(f"Failed to update event {event_id}: {e}")
         return False
-
+    
 
 @admin_event_router.message(F.text == "Удалить мероприятие")
 async def delete_event_start(message: Message):
@@ -673,11 +729,27 @@ async def delete_event_select(message: Message, state: FSMContext):
     builder.button(text="Отмена")
     builder.adjust(1)
 
-    await message.answer_photo(
-        caption=f"Вы выбрали мероприятие:\n\n{current_event_text}\n\nВы действительно хотите удалить это мероприятие?",
-        photo=event.get("photo", None),
-        reply_markup=builder.as_markup(resize_keyboard=True)
-    )
+    photo_url = event.get("photo")
+    if photo_url:
+        try:
+            await message.answer_photo(
+                photo=photo_url,
+                caption=f"Вы выбрали мероприятие:\n\n{current_event_text}\n\nВы действительно хотите удалить это мероприятие?",
+                parse_mode="Markdown",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отправки фото: {e}")
+            await message.answer(
+                f"Вы выбрали мероприятие:\n\n{current_event_text}\n\n(Фото недоступно)\n\nВы действительно хотите удалить это мероприятие?",
+                reply_markup=builder.as_markup(resize_keyboard=True)
+            )
+    else:
+        await message.answer(
+            f"Вы выбрали мероприятие:\n\n{current_event_text}\n\n(Фото отсутствует)\n\nВы действительно хотите удалить это мероприятие?",
+            reply_markup=builder.as_markup(resize_keyboard=True)
+        )
+
 
 @admin_event_router.message(F.text == "Удалить")
 async def confirm_delete_event(message: Message, state: FSMContext):
