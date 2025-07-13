@@ -212,11 +212,14 @@ async def process_transaction_price(message: Message, state: FSMContext):
         await state.set_state(TransactionFSM.number)
         return
 
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+    headers = {
+        "X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value(),
+        "X-Resident-ID": str(resident_id)
+    }
+
     transaction_data = {
         'price': price,
-        'card_id': card_id,
-        'resident_id': resident_id
+        'card_id': card_id
     }
 
     try:
