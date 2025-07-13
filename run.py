@@ -18,9 +18,9 @@ from cmds.bot_cmds_list import bot_cmds_list
 from client.handlers.profile_handler import profile_router
 from client.handlers.start_handler import start_router
 from client.handlers.loyalty_handler import loyalty_router
+from resident_admin.handlers.RA_promotion_handler import RA_promotion_router
 from resident_admin.handlers.res_admin_handler import res_admin_router
 from resident_admin.handlers.RA_bonus_handler import RA_bonus_router
-from resident_admin.handlers.RA_promotion_handler import RA_promotion_router
 
 from utils.services import notify_restart
 from dotenv import load_dotenv
@@ -53,16 +53,16 @@ def setup_routers(dp: Dispatcher) -> None:
         start_router,
         profile_router,
         loyalty_router,
+        # Резидентские роуетры
+        res_admin_router,
+        RA_bonus_router,
+        RA_promotion_router,
         # Админские роутеры
         admin_router,
         admin_mailing_router,
         admin_resident_router,
         admin_event_router,
-        
-        # Резидентские роуетры
-        res_admin_router,
-        RA_bonus_router,
-        RA_promotion_router
+
     )
     for router in routers:
         dp.include_router(router)

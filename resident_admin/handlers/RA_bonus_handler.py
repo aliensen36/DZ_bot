@@ -1,29 +1,22 @@
 import re
-
 import aiohttp
 from aiogram import Router, F
-from aiogram.filters import Command
 from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-
 from client.services.loyalty import fetch_loyalty_card
 from data.config import config_settings
-from data.url import url_point_transactions_deduct, url_point_transactions_accrue
+from data.url import url_point_transactions_deduct, url_point_transactions_accrue, url_resident
 from resident_admin.services.point_transactions import find_user_by_card_number, get_card_number_by_user, \
     find_user_by_phone, get_card_id_by_tg_id, get_resident_id_by_user_id, get_user_id_by_tg_id
-from resident_admin.keyboards.res_admin_reply import res_admin_keyboard
-from utils.filters import ChatTypeFilter, IsGroupAdmin, RESIDENT_ADMIN_CHAT_ID
+from resident_admin.services.resident_required import resident_required
+from utils.filters import ChatTypeFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
 import logging
-
 logger = logging.getLogger(__name__)
 
 RA_bonus_router = Router()
-RA_bonus_router.message.filter(
-    ChatTypeFilter("private"),
-    IsGroupAdmin([RESIDENT_ADMIN_CHAT_ID], show_message=False)
-)
+RA_bonus_router.message.filter(ChatTypeFilter("private"))
 
 
 class TransactionFSM(StatesGroup):
@@ -32,9 +25,9 @@ class TransactionFSM(StatesGroup):
     price = State()
 
 
-
 # Хендлер для команды "Бонусы"
 @RA_bonus_router.message(F.text == 'Бонусы')
+@resident_required
 async def cmd_add_points(message: Message, state: FSMContext):
     await message.answer('Введите номер телефона покупателя (формат: 79998887766 или +79998887766) '
                          'или номер карты (формат: 123 456):')
@@ -43,6 +36,7 @@ async def cmd_add_points(message: Message, state: FSMContext):
 
 # Хендлер для обработки номера телефона или карты
 @RA_bonus_router.message(TransactionFSM.number)
+@resident_required
 async def process_phone_or_card(message: Message, state: FSMContext):
     input_text = message.text.strip()
 
@@ -158,6 +152,7 @@ async def process_phone_or_card(message: Message, state: FSMContext):
 
 
 @RA_bonus_router.callback_query(TransactionFSM.transaction_type)
+@resident_required
 async def process_transaction_type(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора типа транзакции (начисление или списание)."""
     if callback.data == "transaction_accrue":
@@ -172,6 +167,7 @@ async def process_transaction_type(callback: CallbackQuery, state: FSMContext):
 
 
 @RA_bonus_router.message(TransactionFSM.price)
+@resident_required
 async def process_transaction_price(message: Message, state: FSMContext):
     """Обработка суммы для начисления или списания баллов."""
     try:
