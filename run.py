@@ -52,15 +52,14 @@ def setup_routers(dp: Dispatcher) -> None:
         start_router,
         profile_router,
         loyalty_router,
+        # Резидентские роуетры
+        res_admin_router,
+        RA_bonus_router,
         # Админские роутеры
         admin_router,
         admin_mailing_router,
         admin_resident_router,
         admin_event_router,
-        
-        # Резидентские роуетры
-        res_admin_router,
-        RA_bonus_router
     )
     for router in routers:
         dp.include_router(router)
