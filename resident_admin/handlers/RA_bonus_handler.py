@@ -205,10 +205,9 @@ async def process_transaction_price(message: Message, state: FSMContext):
         await state.set_state(TransactionFSM.number)
         return
 
-    resident_id = await get_resident_id_by_user_id(user_id)
+    resident_id = state_data.get('resident_id')
     if not resident_id:
-        logger.error(f"No resident_id found for user_id={user_id}")
-        await message.answer("Ошибка: Резидент не найден. Попробуйте начать заново.")
+        await message.answer("Ошибка: резидент не определён. Войдите заново.")
         await state.set_state(TransactionFSM.number)
         return
 
