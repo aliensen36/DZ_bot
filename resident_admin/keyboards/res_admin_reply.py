@@ -18,7 +18,7 @@ def res_admin_promotion_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.button(text="Создать акцию")
     builder.button(text="Изменить акцию")
-    builder.button(text="Убрать акцию")
+    builder.button(text="Удалить акцию")
     builder.button(text="↩ Обратно")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)

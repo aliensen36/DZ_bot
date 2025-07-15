@@ -22,9 +22,6 @@ from client.handlers.loyalty_handler import loyalty_router
 from resident_admin.handlers.RA_promotion_handler import RA_promotion_router
 from resident_admin.handlers.res_admin_handler import res_admin_router
 from resident_admin.handlers.RA_bonus_handler import RA_bonus_router
-
-from utils.logging import CallbackLoggingMiddleware
-
 from utils.services import notify_restart
 from dotenv import load_dotenv
 
@@ -38,20 +35,6 @@ PROPERTIES = DefaultBotProperties(parse_mode=ParseMode.HTML)
 
 bot = Bot(token=config_settings.TOKEN.get_secret_value(),
           default=PROPERTIES)
-
-# Настройка логирования
-logging.basicConfig(
-    level=logging.DEBUG,  # Это глобальный уровень для всех логгеров
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-
-# Устанавливаем уровень DEBUG для всех ключевых логгеров aiogram
-logging.getLogger('aiogram').setLevel(logging.DEBUG)
-logging.getLogger('aiogram.bot').setLevel(logging.DEBUG)
-logging.getLogger('aiogram.dispatcher').setLevel(logging.DEBUG)
-logging.getLogger('aiogram.event').setLevel(logging.DEBUG)
-logging.getLogger('aiogram.executor').setLevel(logging.DEBUG)
 
 
 async def startup(dispatcher: Dispatcher):
@@ -67,6 +50,7 @@ async def shutdown(dispatcher: Dispatcher):
 
 def setup_routers(dp: Dispatcher) -> None:
     """Регистрация всех роутеров"""
+
     routers = (
         # Клиентские роутеры
         start_router,
@@ -91,8 +75,6 @@ def setup_routers(dp: Dispatcher) -> None:
 async def main():
     dp = Dispatcher()
 
-    dp.update.middleware(CallbackLoggingMiddleware())
-
     await bot.set_my_commands(commands=bot_cmds_list,
                               scope=types.BotCommandScopeAllPrivateChats())
     setup_routers(dp) # Загрузка роутеров
@@ -110,7 +92,7 @@ async def main():
 
 
 if __name__ == "__main__":
-    #logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

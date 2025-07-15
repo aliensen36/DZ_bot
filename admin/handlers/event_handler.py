@@ -6,14 +6,13 @@ from pydantic import ValidationError
 from aiogram.exceptions import TelegramBadRequest
 from aiogram import Bot, F, Router
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.filters import StateFilter
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.types import ContentType
 from aiogram.fsm.context import FSMContext
 from data.config import config_settings
 from admin.keyboards.admin_reply import events_management_keyboard, admin_keyboard, cancel_keyboard, edit_event_keyboard
-from admin.keyboards.admin_inline import inline_cancel_keyboard
 from data.url import url_event
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 from utils.dowload_photo import download_photo_from_telegram
@@ -36,6 +35,7 @@ URL_PATTERN = re.compile(
     r'(/[\w\-._~:/?#[\]@!$&\'()*+,;=]*)?$'
 )
 MOSCOW_TZ = timezone(timedelta(hours=3))
+TIME_PATTERN = re.compile(r'^\s*(\d{1,2}):(\d{2})\s*$')
 MAX_PHOTO_SIZE = 10 * 1024 * 1024  # 10MB
 ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png']
 
@@ -68,6 +68,9 @@ class EditEventForm(StatesGroup):
     waiting_for_location = State()
     waiting_for_url = State()
 
+class DeleteEventForm(StatesGroup):
+    waiting_for_confirmation = State()
+
 # =================================================================================================
 # Утилитные функции
 # =================================================================================================
@@ -80,12 +83,6 @@ def format_datetime(dt_str: str) -> str:
     except Exception as e:
         logger.error(f"Failed to format datetime: {dt_str}, error: {e}")
         return dt_str or "-"
-
-# Создает инлайн-клавиатуру с кнопкой отмены
-def inline_cancel_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-    ])
 
 # Проверяет, является ли сообщение фото, и соответствует ли оно требованиям (формат JPG/PNG, размер до 10MB)
 async def validate_photo(message: Message) -> tuple[bool, str]:
@@ -229,11 +226,15 @@ async def back_to_admin_menu(message: Message):
         reply_markup=admin_keyboard()
     )
 
-# Отменяет создание или редактирование мероприятия
-@admin_event_router.message(F.text == "Отмена", StateFilter(EventForm, EditEventForm))
-async def cancel_event_creation(message: Message, state: FSMContext):
+# Обрабатывает отмену создания, редактирования или удаления акции
+@admin_event_router.message(F.text == "Отмена", StateFilter(EventForm, EditEventForm, DeleteEventForm))
+async def cancel_promotion_action(message: Message, state: FSMContext):
+    logger.debug(f"Cancel action requested by user {message.from_user.id} in state {await state.get_state()}")
     await state.clear()
-    await message.answer("Вы вернулись в меню мероприятий.", reply_markup=events_management_keyboard())
+    await message.answer(
+        "Действие отменено.",
+        reply_markup=events_management_keyboard()
+    )
 
 # =================================================================================================
 # Обработчики создания мероприятия
@@ -291,7 +292,7 @@ async def process_event_info(message: Message, state: FSMContext):
         return
     await state.update_data(info=info)
     await state.set_state(EventForm.waiting_for_start_date)
-    await message.answer("Выберите дату начала мероприятия:", reply_markup=get_calendar())
+    await message.answer("Выберите дату начала мероприятия:", reply_markup=get_calendar(prefix="event_"))
 
 # Обрабатывает место проведения мероприятия
 @admin_event_router.message(StateFilter(EventForm.waiting_for_location))
@@ -517,12 +518,10 @@ async def process_manual_time_request(callback: CallbackQuery, state: FSMContext
     if current_state in (EventForm.waiting_for_start_time.state, EditEventForm.waiting_for_start_time.state):
         await callback.message.edit_text(
             "Введите время начала (формат ЧЧ:ММ, например, 15:30):",
-            reply_markup=inline_cancel_keyboard()
         )
     elif current_state in (EventForm.waiting_for_end_time.state, EditEventForm.waiting_for_end_time.state):
         await callback.message.edit_text(
             "Введите время окончания (формат ЧЧ:ММ, например, 15:30):",
-            reply_markup=inline_cancel_keyboard()
         )
     await callback.answer()
 
@@ -574,7 +573,6 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
             await state.set_state(EventForm.waiting_for_location)
             await callback.message.edit_text(
                 f"Время окончания ({time_str}) сохранено. Введите место проведения мероприятия:",
-                reply_markup=inline_cancel_keyboard()
             )
         elif current_state == EditEventForm.waiting_for_start_time.state:
             start_date = data.get("start_date")
@@ -674,6 +672,288 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
         )
     await callback.answer()
 
+# Обработчики ручного ввода времени для создания мероприятия
+@admin_event_router.message(EventForm.waiting_for_start_time)
+async def process_manual_start_time(message: Message, state: FSMContext):
+    time_str = message.text.strip()
+    match = TIME_PATTERN.match(time_str)
+    if not match:
+        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+        return
+
+    try:
+        hours, minutes = map(int, match.groups())
+        if hours > 23 or minutes > 59:
+            logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
+            await message.answer(
+                "Часы должны быть от 0 до 23, минуты от 00 до 59. Введите корректное время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        time_str = f"{hours:02d}:{minutes:02d}"
+        data = await state.get_data()
+        start_date = data.get("start_date")
+        start_datetime = datetime.strptime(f"{start_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
+        
+        if start_datetime < datetime.now(MOSCOW_TZ):
+            logger.warning(f"User {message.from_user.id} selected past start time: {time_str}")
+            await message.answer(
+                "Время начала не может быть в прошлом. Введите другое время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        
+        await state.update_data(start_datetime=start_datetime)
+        await state.set_state(EventForm.waiting_for_end_date)
+        await message.answer(
+            f"Время начала ({time_str}) сохранено. Выберите дату окончания:",
+            reply_markup=get_calendar(prefix="event_")
+        )
+    except ValueError:
+        logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+
+@admin_event_router.message(EventForm.waiting_for_end_time)
+async def process_manual_end_time(message: Message, state: FSMContext):
+    time_str = message.text.strip()
+    match = TIME_PATTERN.match(time_str)
+    if not match:
+        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+        return
+
+    try:
+        hours, minutes = map(int, match.groups())
+        if hours > 23 or minutes > 59:
+            logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
+            await message.answer(
+                "Часы должны быть от 0 до 23, минуты от 00 до 59. Введите корректное время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        time_str = f"{hours:02d}:{minutes:02d}"
+        data = await state.get_data()
+        end_date = data.get("end_date")
+        end_datetime = datetime.strptime(f"{end_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
+        start_datetime = data.get("start_datetime")
+        
+        if end_datetime <= start_datetime:
+            logger.warning(f"User {message.from_user.id} selected end time {time_str} not after start time")
+            await message.answer(
+                "Время окончания должно быть позже времени начала. Введите другое время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        
+        await state.update_data(end_datetime=end_datetime)
+        await state.set_state(EventForm.waiting_for_location)
+        await message.answer(
+            f"Время окончания ({time_str}) сохранено. Введите место проведения мероприятия:"
+        )
+    except ValueError:
+        logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+
+# Обработчики ручного ввода времени для редактирования мероприятия
+@admin_event_router.message(EditEventForm.waiting_for_start_time)
+async def process_manual_edit_start_time(message: Message, state: FSMContext):
+    time_str = message.text.strip()
+    match = TIME_PATTERN.match(time_str)
+    if not match:
+        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+        return
+
+    try:
+        hours, minutes = map(int, match.groups())
+        if hours > 23 or minutes > 59:
+            logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
+            await message.answer(
+                "Часы должны быть от 0 до 23, минуты от 00 до 59. Введите корректное время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        time_str = f"{hours:02d}:{minutes:02d}"
+        data = await state.get_data()
+        start_date = data.get("start_date")
+        start_datetime = datetime.strptime(f"{start_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
+        
+        if start_datetime < datetime.now(MOSCOW_TZ):
+            logger.warning(f"User {message.from_user.id} selected past start time: {time_str}")
+            await message.answer(
+                "Время начала не может быть в прошлом. Введите другое время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        
+        event = data.get("event")
+        updated_event = await update_event(
+            event_id=event["id"],
+            updated_fields={"start_date": start_datetime.isoformat()},
+            bot=None
+        )
+        if updated_event:
+            end_datetime = datetime.fromisoformat(event["end_date"].replace("Z", "+03:00"))
+            if end_datetime <= start_datetime:
+                logger.warning(f"User {message.from_user.id} set end date {end_datetime} not after new start date {start_datetime}")
+                await message.answer(
+                    "Дата окончания должна быть позже новой даты начала. Пожалуйста, обновите дату окончания:",
+                    reply_markup=get_calendar(prefix="event_")
+                )
+                await state.set_state(EditEventForm.waiting_for_end_date)
+                await state.update_data(start_datetime=start_datetime, end_date=end_datetime)
+                return
+            
+            await state.update_data(event=updated_event)
+            text = (
+                f"Название: {updated_event['title']}\n"
+                f"Описание: {updated_event['description']}\n"
+                f"Информация: {updated_event['info']}\n"
+                f"Дата начала: {format_datetime(updated_event.get('start_date'))}\n"
+                f"Дата окончания: {format_datetime(updated_event.get('end_date'))}\n"
+                f"Место: {updated_event['location']}\n"
+                f"Ссылка для регистрации: {updated_event.get('url')}"
+            )
+            photo_url = updated_event.get("photo")
+            if photo_url:
+                try:
+                    await message.answer_photo(
+                        photo=photo_url,
+                        caption=text,
+                        parse_mode="Markdown",
+                        reply_markup=edit_event_keyboard()
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send photo for event {event['id']}: {e}")
+                    await message.answer(
+                        text + "\n\n(Фото недоступно)",
+                        parse_mode="Markdown",
+                        reply_markup=edit_event_keyboard()
+                    )
+            else:
+                await message.answer(
+                    text + "\n\n(Фото отсутствует)",
+                    parse_mode="Markdown",
+                    reply_markup=edit_event_keyboard()
+                )
+            await state.set_state(EditEventForm.choosing_field)
+        else:
+            logger.error(f"Failed to update start time for event {event['id']}")
+            await message.answer(
+                "Ошибка при обновлении времени начала. Попробуйте снова:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+    except ValueError:
+        logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+
+@admin_event_router.message(EditEventForm.waiting_for_end_time)
+async def process_manual_edit_end_time(message: Message, state: FSMContext):
+    time_str = message.text.strip()
+    match = TIME_PATTERN.match(time_str)
+    if not match:
+        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+        return
+
+    try:
+        hours, minutes = map(int, match.groups())
+        if hours > 23 or minutes > 59:
+            logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
+            await message.answer(
+                "Часы должны быть от 0 до 23, минуты от 00 до 59. Введите корректное время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        time_str = f"{hours:02d}:{minutes:02d}"
+        data = await state.get_data()
+        end_date = data.get("end_date")
+        end_datetime = datetime.strptime(f"{end_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
+        event = data.get("event")
+        start_datetime = datetime.fromisoformat(event["start_date"].replace("Z", "+03:00"))
+        
+        if end_datetime <= start_datetime:
+            logger.warning(f"User {message.from_user.id} selected end time {time_str} not after start time")
+            await message.answer(
+                "Время окончания должно быть позже времени начала. Введите другое время:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+            return
+        
+        updated_event = await update_event(
+            event_id=event["id"],
+            updated_fields={"end_date": end_datetime.isoformat()},
+            bot=None
+        )
+        if updated_event:
+            await state.update_data(event=updated_event)
+            text = (
+                f"Название: {updated_event['title']}\n"
+                f"Описание: {updated_event['description']}\n"
+                f"Информация: {updated_event['info']}\n"
+                f"Дата начала: {format_datetime(updated_event.get('start_date'))}\n"
+                f"Дата окончания: {format_datetime(updated_event.get('end_date'))}\n"
+                f"Место: {updated_event['location']}\n"
+                f"Ссылка для регистрации: {updated_event.get('url')}"
+            )
+            photo_url = updated_event.get("photo")
+            if photo_url:
+                try:
+                    await message.answer_photo(
+                        photo=photo_url,
+                        caption=text,
+                        parse_mode="Markdown",
+                        reply_markup=edit_event_keyboard()
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send photo for event {event['id']}: {e}")
+                    await message.answer(
+                        text + "\n\n(Фото недоступно)",
+                        parse_mode="Markdown",
+                        reply_markup=edit_event_keyboard()
+                    )
+            else:
+                await message.answer(
+                    text + "\n\n(Фото отсутствует)",
+                    parse_mode="Markdown",
+                    reply_markup=edit_event_keyboard()
+                )
+            await state.set_state(EditEventForm.choosing_field)
+        else:
+            logger.error(f"Failed to update end time for event {event['id']}")
+            await message.answer(
+                "Ошибка при обновлении времени окончания. Попробуйте снова:",
+                reply_markup=get_time_keyboard(prefix="event_")
+            )
+    except ValueError:
+        logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
+        await message.answer(
+            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
+            reply_markup=get_time_keyboard(prefix="event_")
+        )
+
 # =================================================================================================
 # Обработчики редактирования и удаления мероприятий
 # =================================================================================================
@@ -764,13 +1044,13 @@ async def edit_event_info(message: Message, state: FSMContext):
 # Запрашивает новую дату начала для редактирования
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить дату начала")
 async def edit_event_start_date(message: Message, state: FSMContext):
-    await message.answer("Выберите новую дату начала:", reply_markup=get_calendar())
+    await message.answer("Выберите новую дату начала:", reply_markup=get_calendar(prefix="event_"))
     await state.set_state(EditEventForm.waiting_for_start_date)
 
 # Запрашивает новую дату окончания для редактирования
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить дату окончания")
 async def edit_event_end_date(message: Message, state: FSMContext):
-    await message.answer("Выберите новую дату окончания:", reply_markup=get_calendar())
+    await message.answer("Выберите новую дату окончания:", reply_markup=get_calendar(prefix="event_"))
     await state.set_state(EditEventForm.waiting_for_end_date)
 
 # Запрашивает новую локацию для редактирования
@@ -967,6 +1247,7 @@ async def delete_event_select(message: Message, state: FSMContext):
         await message.answer("Не удалось найти мероприятие.")
         return
     await state.update_data(event=event)
+    await state.set_state(DeleteEventForm.waiting_for_confirmation)
     current_event_text = (
         f"Название: {event['title']}\n"
         f"Описание: {event['description']}\n"
@@ -1001,7 +1282,7 @@ async def delete_event_select(message: Message, state: FSMContext):
         )
 
 # Подтверждает удаление мероприятия
-@admin_event_router.message(F.text == "Удалить")
+@admin_event_router.message(F.text == "Удалить", StateFilter(DeleteEventForm.waiting_for_confirmation))
 async def confirm_delete_event(message: Message, state: FSMContext):
     data = await state.get_data()
     event = data.get("event")
