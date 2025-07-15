@@ -14,6 +14,7 @@ from aiogram.enums import ParseMode
 from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
 from admin.handlers.event_handler import admin_event_router
+from admin.handlers.approve_reject_promo import admin_promotion_router
 from cmds.bot_cmds_list import bot_cmds_list
 from client.handlers.profile_handler import profile_router
 from client.handlers.start_handler import start_router
@@ -22,8 +23,11 @@ from resident_admin.handlers.RA_promotion_handler import RA_promotion_router
 from resident_admin.handlers.res_admin_handler import res_admin_router
 from resident_admin.handlers.RA_bonus_handler import RA_bonus_router
 
+from utils.logging import CallbackLoggingMiddleware
+
 from utils.services import notify_restart
 from dotenv import load_dotenv
+
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -34,6 +38,21 @@ PROPERTIES = DefaultBotProperties(parse_mode=ParseMode.HTML)
 
 bot = Bot(token=config_settings.TOKEN.get_secret_value(),
           default=PROPERTIES)
+
+# Настройка логирования
+logging.basicConfig(
+    level=logging.DEBUG,  # Это глобальный уровень для всех логгеров
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+
+# Устанавливаем уровень DEBUG для всех ключевых логгеров aiogram
+logging.getLogger('aiogram').setLevel(logging.DEBUG)
+logging.getLogger('aiogram.bot').setLevel(logging.DEBUG)
+logging.getLogger('aiogram.dispatcher').setLevel(logging.DEBUG)
+logging.getLogger('aiogram.event').setLevel(logging.DEBUG)
+logging.getLogger('aiogram.executor').setLevel(logging.DEBUG)
+
 
 async def startup(dispatcher: Dispatcher):
     logger.info("Starting bot...")
@@ -62,6 +81,7 @@ def setup_routers(dp: Dispatcher) -> None:
         admin_mailing_router,
         admin_resident_router,
         admin_event_router,
+        admin_promotion_router,
 
     )
     for router in routers:
@@ -70,6 +90,9 @@ def setup_routers(dp: Dispatcher) -> None:
 
 async def main():
     dp = Dispatcher()
+
+    dp.update.middleware(CallbackLoggingMiddleware())
+
     await bot.set_my_commands(commands=bot_cmds_list,
                               scope=types.BotCommandScopeAllPrivateChats())
     setup_routers(dp) # Загрузка роутеров
@@ -85,9 +108,12 @@ async def main():
         await bot.session.close()
 
 
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
+    #logging.basicConfig(level=logging.INFO)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user")
+
+

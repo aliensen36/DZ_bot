@@ -78,7 +78,7 @@ async def update_user_data(
         payload["email"] = email
 
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    url = f"{url_users.rstrip('/')}/{user_id}/"
+    url = f"{url_users}{user_id}/"
     logger.info(f"Updating user data for user_id={user_id} with payload={payload}, url={url}")
 
     try:
