@@ -111,3 +111,10 @@ async def get_categories_keyboard():
     markup = builder.as_markup()
     print(f"Keyboard markup: {markup}")  # Отладка
     return markup
+
+
+# Функция для создания инлайн-клавиатуры отмены
+def inline_cancel_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+    ])

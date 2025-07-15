@@ -20,6 +20,7 @@ def res_admin_promotion_keyboard():
     builder.button(text="Изменить акцию")
     builder.button(text="Удалить акцию")
     builder.button(text="↩ Обратно")
+    builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
 # Создаёт reply-клавиатуру для отмены действий в админ-панели резидента
