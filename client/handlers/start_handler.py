@@ -35,6 +35,8 @@ async def cmd_start(message: Message, state: FSMContext):
     Notes:
         Выполняет POST-запрос к API для регистрации и отправляет приветствие в зависимости от статуса (200 или 201).
     """
+    referral_code = message.get_args()
+    
     # Данные пользователя, отправляемые при регистрации в API
     user_data = {
         "tg_id": message.from_user.id,
@@ -42,6 +44,7 @@ async def cmd_start(message: Message, state: FSMContext):
         "last_name": message.from_user.last_name or "",
         "username": message.from_user.username or "",
         "is_bot": message.from_user.is_bot,
+        "referral_code_used": referral_code if referral_code else None
     }
 
     try:
