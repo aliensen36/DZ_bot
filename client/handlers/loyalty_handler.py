@@ -117,7 +117,10 @@ async def collect_first_name(message: Message, state: FSMContext):
 async def collect_birth_date(message: Message, state: FSMContext):
     parsed_date = parse_birth_date(message.text)
     if not parsed_date:
-        await message.answer("⚠️ Неверный формат. Попробуйте снова (ДД.ММ.ГГГГ):")
+        await message.answer(
+            "⚠️ Неверный формат или дата рождения указана в будущем. "
+            "Пожалуйста, введите дату в формате ДД.ММ.ГГГГ, и убедитесь, что она не позже сегодняшней."
+        )
         return
     await state.update_data(birth_date=parsed_date)
     await state.set_state(LoyaltyCardForm.phone_number)

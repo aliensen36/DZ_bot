@@ -4,7 +4,7 @@ from typing import Optional
 from data.config import config_settings
 from data.url import url_users
 import re
-from datetime import datetime
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,10 @@ def normalize_phone_number(phone: str) -> str | None:
 def parse_birth_date(date_str: str) -> str | None:
     """Парсит дату рождения в формате ДД.ММ.ГГГГ и возвращает ISO-формат."""
     try:
-        birth_date_obj = datetime.strptime(date_str, "%d.%m.%Y")
-        return birth_date_obj.date().isoformat()
+        birth_date_obj = datetime.strptime(date_str, "%d.%m.%Y").date()
+        if birth_date_obj > date.today():
+            return None
+        return birth_date_obj.isoformat()
     except ValueError:
         return None
 
