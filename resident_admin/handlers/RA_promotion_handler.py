@@ -24,8 +24,6 @@ logger = logging.getLogger(__name__)
 # Роутеры
 RA_promotion_router = Router()
 RA_promotion_router.message.filter(ChatTypeFilter("private"))
-RA_bonus_router = Router()
-RA_bonus_router.message.filter(ChatTypeFilter("private"))
 
 # Константы
 DISCOUNT_PATTERN = re.compile(r'^\s*скидка\s*(\d+\.?\d*)\s*%?\s*$', re.IGNORECASE)
