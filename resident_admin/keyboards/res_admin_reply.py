@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 
@@ -11,6 +12,13 @@ def res_admin_keyboard():
     builder.button(text="Выход")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
+
+
+# Кнопка "Назад"
+back_to_menu_kb = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text="Назад")]],
+    resize_keyboard=True
+)
 
 
 # Создаёт reply-клавиатуру для админ-панели резидента в разделе "Бонусы"

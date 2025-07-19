@@ -5,6 +5,7 @@ from aiogram.types import Message, BufferedInputFile, InlineKeyboardMarkup, Inli
 from client.services.loyalty import fetch_loyalty_card
 from data.config import config_settings
 from data.url import url_point_transactions_deduct, url_point_transactions_accrue, url_resident
+from resident_admin.keyboards.res_admin_reply import back_to_menu_kb, res_admin_keyboard
 from resident_admin.services.point_transactions import find_user_by_card_number, get_card_number_by_user, \
     find_user_by_phone, get_card_id_by_tg_id, get_resident_id_by_user_id, get_user_id_by_tg_id
 from resident_admin.services.resident_required import resident_required
@@ -25,12 +26,21 @@ class TransactionFSM(StatesGroup):
     price = State()
 
 
+@RA_bonus_router.message(F.text == 'Назад')
+@resident_required
+async def back_to_resident_menu(message: Message, state: FSMContext):
+    await state.set_state(None)
+    await message.answer("Главное меню",
+                         reply_markup=res_admin_keyboard())
+
+
 # Хендлер для команды "Бонусы"
 @RA_bonus_router.message(F.text == 'Бонусы')
 @resident_required
-async def cmd_add_points(message: Message, state: FSMContext):
+async def start_bonus_transaction(message: Message, state: FSMContext):
     await message.answer('Введите номер телефона покупателя (формат: 79998887766 или +79998887766) '
-                         'или номер карты (формат: 123 456):')
+                         'или номер карты (формат: 123 456):',
+                          reply_markup=back_to_menu_kb)
     await state.set_state(TransactionFSM.number)
 
 
@@ -191,7 +201,7 @@ async def process_transaction_price(message: Message, state: FSMContext):
         return
 
     # Получаем user_id через tg_id из user_data
-    tg_id = user_data.get('tg_id') or message.from_user.id  # Используем message.from_user.id как запасной вариант
+    tg_id = user_data.get('tg_id') or message.from_user.id
     if not tg_id:
         logger.error(f"No tg_id found in user_data: {user_data}")
         await message.answer("Ошибка: Telegram ID пользователя не найден. Попробуйте начать заново.")
@@ -229,10 +239,25 @@ async def process_transaction_price(message: Message, state: FSMContext):
                     if resp.status == 201:
                         data = await resp.json()
                         points = data.get('points', 0)
-                        await message.answer(
-                            f"Начислено {points} баллов за сумму {price} руб. "
-                            f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
-                        )
+                        # Генерируем изображение карты
+                        card_data = await fetch_loyalty_card(tg_id)
+                        if card_data and card_data.get('card_image'):
+                            # Отправляем изображение карты
+                            await message.answer_photo(
+                                photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
+                                caption=(
+                                    f"Начислено баллов: <b>{points}</b>\n\n"
+                                    f"за покупку на сумму <b>{price}</b> руб.\n\n"
+                                    f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                                )
+                            )
+                        else:
+                            # Если изображение не удалось получить, отправляем только текст
+                            await message.answer(
+                                f"Начислено баллов: <b>{points}</b>\n\n"
+                                f"за покупку на сумму <b>{price}</b> руб.\n\n"
+                                f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                            )
                         await state.clear()
                     else:
                         error_data = await resp.json()
@@ -244,11 +269,26 @@ async def process_transaction_price(message: Message, state: FSMContext):
                 async with session.post(url, headers=headers, json=transaction_data) as resp:
                     if resp.status == 201:
                         data = await resp.json()
-                        points = abs(data.get('points', 0))  # Учитываем отрицательное значение
-                        await message.answer(
-                            f"Списано {points} баллов за сумму {price} руб. "
-                            f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
-                        )
+                        points = abs(data.get('points', 0))
+                        # Генерируем изображение карты
+                        card_data = await fetch_loyalty_card(tg_id)
+                        if card_data and card_data.get('card_image'):
+                            # Отправляем изображение карты
+                            await message.answer_photo(
+                                photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
+                                caption=(
+                                    f"Списано <b>{points}</b> баллов\n\n"
+                                    f"за покупку на сумму <b>{price}</b> руб.\n\n"
+                                    f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                                )
+                            )
+                        else:
+                            # Если изображение не удалось получить, отправляем только текст
+                            await message.answer(
+                                f"Списано <b>{points}</b> баллов\n\n"
+                                f"за покупку на сумму <b>{price}</b> руб.\n\n"
+                                f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                            )
                         await state.clear()
                     else:
                         error_data = await resp.json()

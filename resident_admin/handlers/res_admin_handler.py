@@ -62,7 +62,7 @@ async def process_pin_code(message: Message, state: FSMContext):
 
                     # Сообщаем об успешном входе и выводим резидента один раз
                     await message.answer(
-                        "Вход в резидентскую админ-панель успешен!",
+                        "Вы вошли в административную панель резидента.",
                         reply_markup=res_admin_keyboard()
                     )
                     await message.answer(
