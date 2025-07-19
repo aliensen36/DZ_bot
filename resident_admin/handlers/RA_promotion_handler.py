@@ -1,47 +1,38 @@
 import re
 import aiohttp
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.filters import StateFilter
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import ContentType
 
 from data.config import config_settings
 from data.url import url_promotions
 from resident_admin.keyboards.res_admin_reply import res_admin_promotion_keyboard, res_admin_keyboard, res_admin_cancel_keyboard, res_admin_edit_promotion_keyboard
 from utils.filters import ChatTypeFilter
-from utils.dowload_photo import download_photo_from_telegram
-from utils.calendar import get_calendar, get_time_keyboard
+from utils.photo import download_photo_from_telegram, validate_photo
+from utils.calendar import get_calendar, get_time_keyboard, format_datetime
+from utils.constants import URL_PATTERN, MOSCOW_TZ, TIME_PATTERN
+from resident_admin.services.resident_required import resident_required
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
 
+# Роутеры
 RA_promotion_router = Router()
 RA_promotion_router.message.filter(ChatTypeFilter("private"))
 
 # Константы
-URL_PATTERN = re.compile(
-    r'^(https?://)?'
-    r'([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'
-    r'(:\d+)?'
-    r'(/[\w\-._~:/?#[\]@!$&\'()*+,;=]*)?$'
-)
-MAX_PHOTO_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png']
-
 DISCOUNT_PATTERN = re.compile(r'^\s*скидка\s*(\d+\.?\d*)\s*%?\s*$', re.IGNORECASE)
 BONUS_PATTERN = re.compile(r'^\s*бонус(?:ов)?\s*(\d+\.?\d*)\s*$', re.IGNORECASE)
-
-MOSCOW_TZ = timezone(timedelta(hours=3))
-TIME_PATTERN = re.compile(r'^\s*(\d{1,2}):(\d{2})\s*$')
 
 # =================================================================================================
 # Состояния FSM
 # =================================================================================================
+
 class PromotionForm(StatesGroup):
     waiting_for_title = State()
     waiting_for_photo = State()
@@ -72,38 +63,6 @@ class DeletePromotionForm(StatesGroup):
 # Вспомогательные функции
 # =================================================================================================
 
-# Форматирует дату и время в строковый формат
-def format_datetime(dt_str):
-    try:
-        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-        return dt.strftime("%d.%m.%Y %H:%M")
-    except Exception:
-        return dt_str or "-"
-    
-# Проверяет, является ли сообщение фото, и соответствует ли оно требованиям (формат JPG/PNG, размер до 10MB)
-async def validate_photo(message: Message) -> tuple[bool, str]:
-    if message.content_type != ContentType.PHOTO:
-        logger.warning(f"Invalid content type: {message.content_type}")
-        return False, "Пожалуйста, отправьте изображение в формате JPG или PNG."
-    if not message.photo:
-        logger.warning("No photo received")
-        return False, "Фото не получено. Пожалуйста, отправьте изображение."
-    photo = message.photo[-1]
-    if photo.file_size > MAX_PHOTO_SIZE:
-        logger.warning(f"Photo size {photo.file_size} exceeds limit {MAX_PHOTO_SIZE}")
-        return False, "Фото слишком большое. Максимальный размер: 10 МБ."
-    return True, photo.file_id
-
-# Очищает состояние FSM, сохраняя resident_id
-async def clear_state_except_resident_id(state: FSMContext):
-    data = await state.get_data()
-    resident_id = data.get("resident_id")
-    await state.clear()
-    if resident_id:
-        await state.update_data(resident_id=resident_id)
-    logger.debug(f"State cleared, resident_id={resident_id} preserved")
-
-# Формирует данные обновленной акции
 def format_promotion_text(promotion: dict) -> str:
     return (
         f"<b>Акция обновлена: {promotion['title']}</b>\n\n"
@@ -111,24 +70,54 @@ def format_promotion_text(promotion: dict) -> str:
         f"Период: {format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n\n"
         f"{promotion['discount_or_bonus'].capitalize()}: {promotion['discount_or_bonus_value']}{'%' if promotion['discount_or_bonus'] == 'скидка' else ''}\n\n"
         f"Ссылка: {promotion['url']}\n"
-        f"Статус: {'Подтверждена' if promotion.get('is_approved', False) else 'Ожидает подтверждения'}"
+        f"Статус: {'Подтверждена' if promotion.get('is_approved', False) else 'Ожидае подтверждения'}"
     )
+
+async def handle_missing_promotion(message: Message, state: FSMContext):
+    data = await state.get_data()
+    await state.clear()
+    if data.get("resident_id"):
+        await state.update_data(resident_id=data["resident_id"], resident_name=data["resident_name"])
+    await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
+
+async def finish_edit_promotion(message, state, updated_promotion, promotion, data):
+    if updated_promotion:
+        await state.update_data(promotion=updated_promotion)
+        text = format_promotion_text(updated_promotion)
+        photo_url = updated_promotion.get("photo")
+        if photo_url:
+            try:
+                await message.answer_photo(
+                    photo=photo_url,
+                    caption=f"{text}\n\nРедактирование завершено. Ожидайте подтверждения администратора.",
+                    parse_mode="HTML",
+                    reply_markup=res_admin_promotion_keyboard()
+                )
+            except Exception:
+                await message.answer(
+                    f"{text}\n\n(Фото недоступно)\n\nРедактирование завершено.",
+                    parse_mode="HTML",
+                    reply_markup=res_admin_promotion_keyboard()
+                )
+        else:
+            await message.answer(
+                f"{text}\n\n(Фото отсутствует)\n\nРедактирование завершено.",
+                parse_mode="HTML",
+                reply_markup=res_admin_promotion_keyboard()
+            )
+        await state.set_state(PromotionEditForm.waiting_for_title)
+    else:
+        await handle_missing_promotion(message, state)
 
 # =================================================================================================
 # Функции для работы с БД
 # =================================================================================================
 
-# Создает новую акцию в базе данных
 async def create_new_promotion(promotion_data: dict, photo_file_id: str = None, resident_id: int = None, bot=None):
     logger.info(f"Creating promotion for resident_id={resident_id}")
     url = f"{url_promotions}"
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
     data = promotion_data.copy()
-
-    if resident_id is None:
-        logger.error("Resident ID is required but not provided")
-        raise ValueError("Resident ID is required")
-
     form_data = aiohttp.FormData()
     for key, value in data.items():
         form_data.add_field(key, str(value))
@@ -163,7 +152,6 @@ async def create_new_promotion(promotion_data: dict, photo_file_id: str = None, 
         logger.error(f"HTTP Client Error creating promotion: {e}")
         return None
 
-# Получает список акций для указанного резидента
 async def get_promotion_list(resident_id: int):
     logger.info(f"Fetching promotion list for resident_id={resident_id}")
     url = f"{url_promotions}?resident={resident_id}"
@@ -181,7 +169,6 @@ async def get_promotion_list(resident_id: int):
         logger.error(f"Error fetching promotions: {e}")
         return []
 
-# Получает акцию по названию
 async def get_promotion_by_title(title: str, state: FSMContext) -> dict:
     data = await state.get_data()
     resident_id = data.get("resident_id")
@@ -194,7 +181,6 @@ async def get_promotion_by_title(title: str, state: FSMContext) -> dict:
     logger.warning(f"Promotion with title '{title}' not found")
     return None
 
-# Обновляет данные акции
 async def update_promotion(promotion_id: int, updated_fields: dict, bot: Bot = None):
     logger.info(f"Updating promotion {promotion_id} with fields: {updated_fields.keys()}")
     url = f"{url_promotions}{promotion_id}/"
@@ -230,7 +216,6 @@ async def update_promotion(promotion_id: int, updated_fields: dict, bot: Bot = N
         logger.error(f"Error updating promotion {promotion_id}: {e}")
         return False
 
-# Удаляет акцию из базы данных
 async def delete_promotion(promotion_id: int) -> bool:
     logger.info(f"Deleting promotion {promotion_id}")
     url = f"{url_promotions}{promotion_id}/"
@@ -249,31 +234,42 @@ async def delete_promotion(promotion_id: int) -> bool:
         return False
 
 # =================================================================================================
-# Обработчики меню и отмены
+# Обработчики Сбросить, Обратно, Акции
 # =================================================================================================
 
-# Обрабатывает отмену создания, редактирования или удаления акции
 @RA_promotion_router.message(F.text == "Сбросить", StateFilter(PromotionForm, PromotionEditForm, DeletePromotionForm))
+@resident_required
 async def cancel_promotion_action(message: Message, state: FSMContext):
     logger.debug(f"Cancel action requested by user {message.from_user.id} in state {await state.get_state()}")
-    await clear_state_except_resident_id(state)
+    data = await state.get_data()
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
+    await state.clear()
+    if resident_id:
+        await state.update_data(resident_id=resident_id, resident_name=resident_name)
     await message.answer(
         "Действие отменено.",
         reply_markup=res_admin_promotion_keyboard()
     )
 
-# Возвращает в главное меню администратора
 @RA_promotion_router.message(F.text == "↩ Обратно")
-async def back_to_res_admin_menu(message: Message):
+@resident_required
+async def back_to_res_admin_menu(message: Message, state: FSMContext):
     logger.info(f"User {message.from_user.id} returned to admin menu")
+    data = await state.get_data()
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
+    await state.clear()
+    if resident_id:
+        await state.update_data(resident_id=resident_id, resident_name=resident_name)
     await message.answer(
         "Вы вернулись в главное меню администратора.",
         reply_markup=res_admin_keyboard()
     )
 
-# Отображает меню управления акциями
 @RA_promotion_router.message(F.text == "Акции")
-async def handle_promotions(message: Message):
+@resident_required
+async def handle_promotions(message: Message, state: FSMContext):
     logger.info(f"User {message.from_user.id} accessed promotions menu")
     await message.answer(
         "Управление акциями:",
@@ -281,11 +277,11 @@ async def handle_promotions(message: Message):
     )
 
 # =================================================================================================
-# Обработчики создания мероприятия
+# Обработчики создания акции
 # =================================================================================================
 
-# Начинает процесс создания новой акции
 @RA_promotion_router.message(F.text == "Создать акцию")
+@resident_required
 async def handle_add_promotion(message: Message, state: FSMContext):
     logger.info(f"User {message.from_user.id} started creating a new promotion")
     await state.set_state(PromotionForm.waiting_for_title)
@@ -294,8 +290,8 @@ async def handle_add_promotion(message: Message, state: FSMContext):
         reply_markup=res_admin_cancel_keyboard()
     )
 
-# Обрабатывает ввод названия акции
 @RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_title))
+@resident_required
 async def process_promotion_title(message: Message, state: FSMContext):
     title = message.text.strip()
     if not title:
@@ -306,9 +302,9 @@ async def process_promotion_title(message: Message, state: FSMContext):
     await state.set_state(PromotionForm.waiting_for_photo)
     await message.answer("Отправьте фото для акции:", reply_markup=res_admin_cancel_keyboard())
 
-# Обрабатывает загрузку фото акции с валидацией формата
 @RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_photo))
-async def process_promotion_photo(message: Message, state: FSMContext):
+@resident_required
+async def process_promotion_photo(message: Message, state: FSMContext, bot: Bot):
     is_valid, result = await validate_photo(message)
     if not is_valid:
         await message.answer(result, reply_markup=res_admin_cancel_keyboard())
@@ -318,8 +314,8 @@ async def process_promotion_photo(message: Message, state: FSMContext):
     await state.set_state(PromotionForm.waiting_for_description)
     await message.answer("Фото получено. Введите описание акции:", reply_markup=res_admin_cancel_keyboard())
 
-# Обрабатывает ввод описания акции
 @RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_description))
+@resident_required
 async def process_promotion_description(message: Message, state: FSMContext):
     description = message.text.strip()
     if not description:
@@ -330,9 +326,9 @@ async def process_promotion_description(message: Message, state: FSMContext):
     await state.set_state(PromotionForm.waiting_for_start_date)
     await message.answer("Выберите дату начала акции:", reply_markup=get_calendar(prefix="promo_"))
 
-# Обрабатывает ввод скидки или бонуса
 @RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_discount_or_bonus))
-async def process_discount_or_bonus(message: Message, state: FSMContext, bot):
+@resident_required
+async def process_discount_or_bonus(message: Message, state: FSMContext, bot: Bot):
     input_text = message.text.strip().lower()
     
     discount_match = DISCOUNT_PATTERN.match(input_text)
@@ -372,9 +368,9 @@ async def process_discount_or_bonus(message: Message, state: FSMContext, bot):
         reply_markup=res_admin_cancel_keyboard()
     )
 
-# Обрабатывает ввод URL и создает акцию
 @RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_url))
-async def process_promotion_url_and_create(message: Message, state: FSMContext, bot):
+@resident_required
+async def process_promotion_url_and_create(message: Message, state: FSMContext, bot: Bot):
     url = message.text.strip()
     if not url:
         logger.warning(f"User {message.from_user.id} provided empty URL")
@@ -400,7 +396,7 @@ async def process_promotion_url_and_create(message: Message, state: FSMContext, 
             "Ошибка: не удалось определить ID резидента. Пожалуйста, войдите в админ-панель заново с помощью команды /res_admin.",
             reply_markup=res_admin_promotion_keyboard()
         )
-        await clear_state_except_resident_id(state)
+        await state.clear()
         return
 
     promotion_data = {
@@ -417,7 +413,7 @@ async def process_promotion_url_and_create(message: Message, state: FSMContext, 
     created_promotion = await create_new_promotion(promotion_data, photo_file_id, resident_id, bot)
     if created_promotion:
         logger.info(f"Promotion created successfully for user_id={message.from_user.id}, title={promotion_data['title']}")
-        caption=(
+        caption = (
             f"Акция успешно создана!\n"
             f"Название: {promotion_data['title']}\n"
             f"Описание: {promotion_data['description']}\n"
@@ -428,7 +424,7 @@ async def process_promotion_url_and_create(message: Message, state: FSMContext, 
             f"Ожидайте подтверждения от администратора."
         )
 
-        photo_url=created_promotion.get("photo")
+        photo_url = created_promotion.get("photo")
         if photo_url:
             await message.answer_photo(
                 photo=photo_url,
@@ -437,62 +433,41 @@ async def process_promotion_url_and_create(message: Message, state: FSMContext, 
                 reply_markup=res_admin_promotion_keyboard(),
             )
 
-        await clear_state_except_resident_id(state)
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=data.get("resident_name"))
     else:
         logger.error(f"Failed to create promotion for user_id={message.from_user.id}")
         await message.answer(
             "Произошла ошибка при создании акции. Пожалуйста, проверьте данные и попробуйте еще раз.",
             reply_markup=res_admin_promotion_keyboard()
         )
-        await clear_state_except_resident_id(state)
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=data.get("resident_name"))
 
 # =================================================================================================
 # Обработчики календаря и времени
 # =================================================================================================
 
-# Обрабатывает некликабельные поля
 @RA_promotion_router.callback_query(F.data == "ignore")
+@resident_required
 async def process_ignore_callback(callback: CallbackQuery):
     logger.debug(f"Ignore callback received from user {callback.from_user.id}")
     await callback.answer()
 
-# Обрабатывает выбор даты начала акции
-@RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_start_date))
-async def process_start_date_selection(message: Message, state: FSMContext):
-    await message.answer(
-        "Выберите дату начала акции:",
-        reply_markup=get_calendar(prefix="promo_")
-    )
-
-# Обрабатывает выбор даты окончания акции
-@RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_end_date))
-async def process_end_date_selection(message: Message, state: FSMContext):
-    await message.answer(
-        "Выберите дату окончания акции:",
-        reply_markup=get_calendar(prefix="promo_")
-    )
-
-# Обрабатывает выбор даты через callback
 @RA_promotion_router.callback_query(F.data.startswith("promo_select_date:"))
+@resident_required
 async def process_date_callback(callback: CallbackQuery, state: FSMContext):
-
     current_state = await state.get_state()
     logger.debug(f"Processing date callback, state={current_state}, callback_data={callback.data}, user_id={callback.from_user.id}")
 
-    date_str = callback.data[len("promo_select_date:"):]  # Извлекаем дату без префикса
+    date_str = callback.data[len("promo_select_date:"):]
     try:
         selected_date = datetime.strptime(date_str, "%d.%m.%Y").replace(tzinfo=MOSCOW_TZ)
-        current_time = datetime.now(MOSCOW_TZ)
-        if selected_date.date() < current_time.date():
-            logger.warning(f"User {callback.from_user.id} selected past date: {date_str}")
-            await callback.message.edit_text(
-                "Дата не может быть в прошлом. Пожалуйста, выберите другую дату:",
-                reply_markup=get_calendar(prefix="promo_")
-            )
-            await callback.answer()
-            return
+        data = await state.get_data()
+        updated_fields = data.get("updated_fields", {})
 
-        current_state = await state.get_state()
         if current_state == PromotionForm.waiting_for_start_date.state:
             await state.update_data(start_date=selected_date)
             await state.set_state(PromotionForm.waiting_for_start_time)
@@ -501,15 +476,18 @@ async def process_date_callback(callback: CallbackQuery, state: FSMContext):
                 reply_markup=get_time_keyboard(prefix="promo_")
             )
         elif current_state == PromotionForm.waiting_for_end_date.state:
-            data = await state.get_data()
             start_date = data.get("start_date")
             if selected_date.date() < start_date.date():
-                logger.warning(f"User {callback.from_user.id} selected end date {date_str} before start date")
-                await callback.message.edit_text(
-                    "Дата окончания не может быть раньше даты начала. Выберите другую дату:",
-                    reply_markup=get_calendar(prefix="promo_")
-                )
-                await callback.answer()
+                logger.warning(f"End date {date_str} before start date")
+                current_text = callback.message.text or ""
+                new_text = "Дата окончания не может быть раньше даты начала. Выберите другую дату:"
+                if current_text != new_text:
+                    await callback.message.edit_text(
+                        new_text,
+                        reply_markup=get_calendar(prefix="promo_")
+                    )
+                else:
+                    await callback.answer("Дата окончания не может быть раньше даты начала.")
                 return
             await state.update_data(end_date=selected_date)
             await state.set_state(PromotionForm.waiting_for_end_time)
@@ -518,93 +496,103 @@ async def process_date_callback(callback: CallbackQuery, state: FSMContext):
                 reply_markup=get_time_keyboard(prefix="promo_")
             )
         elif current_state == PromotionEditForm.waiting_for_start_date.state:
-            if selected_date.date() < current_time.date():
-                logger.warning(f"User {callback.from_user.id} selected past start date: {date_str}")
-                await callback.message.edit_text(
-                    "Дата начала не может быть в прошлом. Выберите другую дату:",
-                    reply_markup=get_calendar(prefix="promo_")
-                )
-                await callback.answer()
-                return
-            await state.update_data(start_date=selected_date)
+            updated_fields["start_date"] = selected_date
+            await state.update_data(start_date=selected_date, updated_fields=updated_fields)
             await state.set_state(PromotionEditForm.waiting_for_start_time)
             await callback.message.edit_text(
                 f"Выбрана дата начала: {date_str}. Выберите время начала:",
                 reply_markup=get_time_keyboard(prefix="promo_")
             )
         elif current_state == PromotionEditForm.waiting_for_end_date.state:
-            data = await state.get_data()
-            promotion = data.get("promotion")
-            start_date = datetime.fromisoformat(promotion["start_date"].replace("Z", "+03:00")).date()
+            start_date = data.get("start_date") or datetime.fromisoformat(data.get("promotion")["start_date"].replace("Z", "+03:00"))
+            start_date = start_date.date() if isinstance(start_date, datetime) else start_date
             if selected_date.date() < start_date:
-                logger.warning(f"User {callback.from_user.id} selected end date {date_str} before start date")
-                await callback.message.edit_text(
-                    "Дата окончания не может быть раньше даты начала. Выберите другую дату:",
-                    reply_markup=get_calendar(prefix="promo_")
-                )
-                await callback.answer()
+                logger.warning(f"End date {date_str} before start date {start_date}")
+                current_text = callback.message.text or ""
+                new_text = "Дата окончания не может быть раньше даты начала. Выберите другую дату:"
+                if current_text != new_text:
+                    await callback.message.edit_text(
+                        new_text,
+                        reply_markup=get_calendar(prefix="promo_")
+                    )
+                else:
+                    await callback.answer("Дата окончания не может быть раньше даты начала.")
                 return
-            await state.update_data(end_date=selected_date)
+            updated_fields["end_date"] = selected_date
+            await state.update_data(end_date=selected_date, updated_fields=updated_fields)
             await state.set_state(PromotionEditForm.waiting_for_end_time)
             await callback.message.edit_text(
                 f"Выбрана дата окончания: {date_str}. Выберите время окончания:",
                 reply_markup=get_time_keyboard(prefix="promo_")
             )
-    except ValueError:
-        logger.error(f"User {callback.from_user.id} provided invalid date format: {date_str}")
-        await callback.message.edit_text(
-            "Ошибка в формате даты. Попробуйте снова:",
-            reply_markup=get_calendar(prefix="promo_")
-        )
+    except ValueError as e:
+        logger.error(f"Invalid date format: {date_str}, error: {e}")
+        current_text = callback.message.text or ""
+        new_text = "Ошибка в формате даты. Попробуйте снова:"
+        if current_text != new_text:
+            await callback.message.edit_text(
+                new_text,
+                reply_markup=get_calendar(prefix="promo_")
+            )
+        else:
+            await callback.answer("Ошибка в формате даты.")
+    except Exception as e:
+        logger.error(f"Unexpected error in date callback: {e}")
+        current_text = callback.message.text or ""
+        new_text = "Произошла ошибка при выборе даты. Попробуйте снова:"
+        if current_text != new_text:
+            await callback.message.edit_text(
+                new_text,
+                reply_markup=get_calendar(prefix="promo_")
+            )
+        else:
+            await callback.answer("Произошла ошибка при выборе даты.")
     await callback.answer()
 
-# Обрабатывает навигацию по месяцам в календаре
 @RA_promotion_router.callback_query(F.data.startswith(("promo_prev_month:", "promo_next_month:")))
+@resident_required
 async def process_month_navigation(callback: CallbackQuery, state: FSMContext):
     _, month, year = callback.data.split(":")
     month, year = int(month), int(year)
     await callback.message.edit_reply_markup(reply_markup=get_calendar(year, month, prefix="promo_"))
     await callback.answer()
 
-# Обрабатывает запрос ручного ввода времени
 @RA_promotion_router.callback_query(F.data == "promo_manual_time")
+@resident_required
 async def process_manual_time_request(callback: CallbackQuery, state: FSMContext):
     current_state = await state.get_state()
-    if current_state in (PromotionForm.waiting_for_start_time.state, PromotionEditForm.waiting_for_start_time.state):
-        await callback.message.edit_text(
-            "Введите время начала (формат ЧЧ:ММ, например, 15:30):",
-        )
-    elif current_state in (PromotionForm.waiting_for_end_time.state, PromotionEditForm.waiting_for_end_time.state):
-        await callback.message.edit_text(
-            "Введите время окончания (формат ЧЧ:ММ, например, 15:30):",
-        )
+    prompt = "Введите время начала (формат ЧЧ:ММ, например, 15:30):" if current_state in (PromotionForm.waiting_for_start_time.state, PromotionEditForm.waiting_for_start_time.state) else "Введите время окончания (формат ЧЧ:ММ, например, 15:30):"
+    await callback.message.edit_text(prompt)
     await callback.answer()
 
-# Обрабатывает выбор времени через callback
 @RA_promotion_router.callback_query(F.data.startswith("promo_select_time:"))
+@resident_required
 async def process_time_callback(callback: CallbackQuery, state: FSMContext):
-
     current_state = await state.get_state()
     logger.debug(f"Processing time callback, state={current_state}, callback_data={callback.data}, user_id={callback.from_user.id}")
 
-    time_str = callback.data[len("promo_select_time:"):]  # Извлекаем время без префикса
+    time_str = callback.data[len("promo_select_time:"):]
     try:
         if len(time_str) == 1 or (len(time_str) == 2 and time_str.isdigit()):
             time_str = f"{time_str.zfill(2)}:00"
         datetime.strptime(time_str, "%H:%M")
-        current_state = await state.get_state()
         data = await state.get_data()
-        
+        updated_fields = data.get("updated_fields", {})
+
         if current_state == PromotionForm.waiting_for_start_time.state:
             start_date = data.get("start_date")
             start_datetime = datetime.strptime(f"{start_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
             if start_datetime < datetime.now(MOSCOW_TZ):
-                logger.warning(f"User {callback.from_user.id} selected past start time: {time_str}")
-                await callback.message.edit_text(
-                    "Время начала не может быть в прошлом. Выберите другое время:",
-                    reply_markup=get_time_keyboard(prefix="promo_")
-                )
-                await callback.answer()
+                logger.warning(f"Selected past start time: {time_str}")
+                current_text = callback.message.text or ""
+                new_text = "Время начала не может быть в прошлом. Выберите другое время:"
+                if current_text != new_text:
+                    await callback.message.edit_text(
+                        new_text,
+                        reply_markup=get_time_keyboard(prefix="promo_")
+                    )
+                else:
+                    await callback.answer("Время начала не может быть в прошлом.")
                 return
             await state.update_data(start_datetime=start_datetime)
             await state.set_state(PromotionForm.waiting_for_end_date)
@@ -617,117 +605,97 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
             end_datetime = datetime.strptime(f"{end_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
             start_datetime = data.get("start_datetime")
             if end_datetime <= start_datetime:
-                logger.warning(f"User {callback.from_user.id} selected end time {time_str} not after start time")
-                await callback.message.edit_text(
-                    "Время окончания должно быть позже времени начала. Выберите другое время:",
-                    reply_markup=get_time_keyboard(prefix="promo_")
-                )
-                await callback.answer()
+                logger.warning(f"End time {time_str} not after start time")
+                current_text = callback.message.text or ""
+                new_text = "Время окончания должно быть позже времени начала. Выберите другое время:"
+                if current_text != new_text:
+                    await callback.message.edit_text(
+                        new_text,
+                        reply_markup=get_time_keyboard(prefix="promo_")
+                    )
+                else:
+                    await callback.answer("Время окончания должно быть позже времени начала.")
                 return
             await state.update_data(end_datetime=end_datetime)
             await state.set_state(PromotionForm.waiting_for_discount_or_bonus)
             await callback.message.edit_text(
-                f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500':"
+                f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500':",
+                reply_markup=res_admin_edit_promotion_keyboard()
             )
         elif current_state == PromotionEditForm.waiting_for_start_time.state:
             start_date = data.get("start_date")
             start_datetime = datetime.strptime(f"{start_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
             if start_datetime < datetime.now(MOSCOW_TZ):
-                logger.warning(f"User {callback.from_user.id} selected past start time: {time_str}")
-                await callback.message.edit_text(
-                    "Время начала не может быть в прошлом. Выберите другое время:",
-                    reply_markup=get_time_keyboard(prefix="promo_")
-                )
-                await callback.answer()
-                return
-            promotion = data.get("promotion")
-            updated_promotion = await update_promotion(
-                promotion_id=promotion["id"],
-                updated_fields={"start_date": start_datetime.isoformat()},
-                bot=None
-            )
-            if updated_promotion:
-                promotion["start_date"] = updated_promotion.get("start_date", start_datetime.isoformat())
-                end_datetime = datetime.fromisoformat(promotion["end_date"].replace("Z", "+03:00"))
-                if end_datetime <= start_datetime:
-                    logger.warning(f"User {callback.from_user.id} set end date {end_datetime} not after new start date {start_datetime}")
+                current_text = callback.message.text or ""
+                new_text = "Время начала не может быть в прошлом. Выберите другое:"
+                if current_text != new_text:
                     await callback.message.edit_text(
-                        "Дата окончания должна быть позже новой даты начала. Пожалуйста, обновите дату окончания:",
-                        reply_markup=get_calendar(prefix="promo_")
+                        new_text,
+                        reply_markup=get_time_keyboard(prefix="promo_")
                     )
-                    await state.set_state(PromotionEditForm.waiting_for_end_date)
-                    await state.update_data(start_datetime=start_datetime, end_date=end_datetime)
-                    await callback.answer()
-                    return
-                await state.update_data(promotion=updated_promotion)
-                await callback.message.delete()
-                await callback.message.answer(
-                    f"Дата и время начала обновлены: {start_datetime.strftime('%d.%m.%Y %H:%M')}.",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-                await state.set_state(PromotionEditForm.choosing_field)
-            else:
-                logger.error(f"Failed to update start time for promotion {promotion['id']}")
-                await callback.message.edit_text(
-                    "Ошибка при обновлении времени начала. Попробуйте снова:",
-                    reply_markup=get_time_keyboard(prefix="promo_")
-                )
+                else:
+                    await callback.answer("Время начала не может быть в прошлом.")
+                return
+            updated_fields["start_datetime"] = start_datetime
+            await state.update_data(start_datetime=start_datetime, updated_fields=updated_fields)
+            await state.set_state(PromotionEditForm.waiting_for_end_date)
+            await callback.message.delete()
+            await callback.message.answer(
+                f"Время начала ({time_str}) сохранено. Выберите дату окончания (или нажмите 'Пропустить'):",
+                reply_markup=get_calendar(prefix="promo_")
+            )
         elif current_state == PromotionEditForm.waiting_for_end_time.state:
             end_date = data.get("end_date")
             end_datetime = datetime.strptime(f"{end_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
-            promotion = data.get("promotion")
-            start_datetime = datetime.fromisoformat(promotion["start_date"].replace("Z", "+03:00"))
+            start_datetime = data.get("start_datetime") or datetime.fromisoformat(data.get("promotion")["start_date"].replace("Z", "+03:00"))
             if end_datetime <= start_datetime:
-                logger.warning(f"User {callback.from_user.id} selected end time {time_str} not after start time")
-                await callback.message.edit_text(
-                    "Время окончания должно быть позже времени начала. Выберите другое время:",
-                    reply_markup=get_time_keyboard(prefix="promo_")
-                )
-                await callback.answer()
+                current_text = callback.message.text or ""
+                new_text = "Время окончания должно быть позже начала. Выберите другое:"
+                if current_text != new_text:
+                    await callback.message.edit_text(
+                        new_text,
+                        reply_markup=get_time_keyboard(prefix="promo_")
+                    )
+                else:
+                    await callback.answer("Время окончания должно быть позже начала.")
                 return
-            updated_promotion = await update_promotion(
-                promotion_id=promotion["id"],
-                updated_fields={"end_date": end_datetime.isoformat()},
-                bot=None
+            updated_fields["end_datetime"] = end_datetime
+            await state.update_data(end_datetime=end_datetime, updated_fields=updated_fields)
+            await state.set_state(PromotionEditForm.waiting_for_discount_or_bonus)
+            await callback.message.answer(
+                f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500' (или нажмите 'Пропустить'):",
+                reply_markup=res_admin_edit_promotion_keyboard()
             )
-            if updated_promotion:
-                promotion["end_date"] = updated_promotion.get("end_date", end_datetime.isoformat())
-                await state.update_data(promotion=updated_promotion)
-                await callback.message.delete()
-                await callback.message.answer(
-                    f"Дата и время окончания обновлены: {end_datetime.strftime('%d.%m.%Y %H:%M')}.",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-                await state.set_state(PromotionEditForm.choosing_field)
-            else:
-                logger.error(f"Failed to update end time for promotion {promotion['id']}")
-                await callback.message.edit_text(
-                    "Ошибка при обновлении времени окончания. Попробуйте снова:",
-                    reply_markup=get_time_keyboard(prefix="promo_")
-                )
-    except ValueError:
-        logger.error(f"User {callback.from_user.id} provided invalid time format: {time_str}")
-        await callback.message.edit_text(
-            f"Неверный формат времени: '{time_str}'. Пожалуйста, выберите время в формате ЧЧ:ММ (например, 22:00):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
+    except ValueError as e:
+        logger.error(f"Invalid time format: {time_str}, error: {e}")
+        current_text = callback.message.text or ""
+        new_text = f"Неверный формат времени: '{time_str}'. Выберите время в формате ЧЧ:ММ (например, 22:00):"
+        if current_text != new_text:
+            await callback.message.edit_text(
+                new_text,
+                reply_markup=get_time_keyboard(prefix="promo_")
+            )
+        else:
+            await callback.answer("Неверный формат времени.")
+    except Exception as e:
+        logger.error(f"Unexpected error in time callback: {e}")
+        current_text = callback.message.text or ""
+        new_text = "Произошла ошибка при выборе времени. Попробуйте снова:"
+        if current_text != new_text:
+            await callback.message.edit_text(
+                new_text,
+                reply_markup=get_time_keyboard(prefix="promo_")
+            )
+        else:
+            await callback.answer("Произошла ошибка при выборе времени.")
     await callback.answer()
 
-# Обработчики ручного ввода времени для создания акции
-@RA_promotion_router.message(PromotionForm.waiting_for_start_time)
+@RA_promotion_router.message(F.text.regexp(TIME_PATTERN), StateFilter(PromotionForm.waiting_for_start_time, PromotionEditForm.waiting_for_start_time))
+@resident_required
 async def process_manual_start_time(message: Message, state: FSMContext):
     time_str = message.text.strip()
-    match = TIME_PATTERN.match(time_str)
-    if not match:
-        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
-        await message.answer(
-            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
-        return
-
     try:
-        hours, minutes = map(int, match.groups())
+        hours, minutes = map(int, TIME_PATTERN.match(time_str).groups())
         if hours > 23 or minutes > 59:
             logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
             await message.answer(
@@ -737,7 +705,7 @@ async def process_manual_start_time(message: Message, state: FSMContext):
             return
         time_str = f"{hours:02d}:{minutes:02d}"
         data = await state.get_data()
-        start_date = data.get("start_date")
+        start_date = data.get("start_date") or (data.get("updated_fields", {}).get("start_datetime") or datetime.now(MOSCOW_TZ)).date()
         start_datetime = datetime.strptime(f"{start_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
         
         if start_datetime < datetime.now(MOSCOW_TZ):
@@ -748,10 +716,17 @@ async def process_manual_start_time(message: Message, state: FSMContext):
             )
             return
         
-        await state.update_data(start_datetime=start_datetime)
-        await state.set_state(PromotionForm.waiting_for_end_date)
+        logger.info(f"User {message.from_user.id} selected start_datetime: {start_datetime}")
+        updated_fields = data.get("updated_fields", {})
+        updated_fields["start_datetime"] = start_datetime
+        await state.update_data(start_datetime=start_datetime, updated_fields=updated_fields)
+        current_state = await state.get_state()
+        next_state = PromotionForm.waiting_for_end_date if current_state.startswith("PromotionForm") else PromotionEditForm.waiting_for_end_date
+        await state.set_state(next_state)
+        await message.delete()
         await message.answer(
-            f"Время начала ({time_str}) сохранено. Выберите дату окончания:",
+            f"Время начала ({time_str}) сохранено. Выберите дату окончания" + 
+            (" (или нажмите 'Пропустить')" if current_state.startswith("PromotionEditForm") else ":"),
             reply_markup=get_calendar(prefix="promo_")
         )
     except ValueError:
@@ -761,20 +736,12 @@ async def process_manual_start_time(message: Message, state: FSMContext):
             reply_markup=get_time_keyboard(prefix="promo_")
         )
 
-@RA_promotion_router.message(PromotionForm.waiting_for_end_time)
+@RA_promotion_router.message(F.text.regexp(TIME_PATTERN), StateFilter(PromotionForm.waiting_for_end_time, PromotionEditForm.waiting_for_end_time))
+@resident_required
 async def process_manual_end_time(message: Message, state: FSMContext):
     time_str = message.text.strip()
-    match = TIME_PATTERN.match(time_str)
-    if not match:
-        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
-        await message.answer(
-            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
-        return
-
     try:
-        hours, minutes = map(int, match.groups())
+        hours, minutes = map(int, TIME_PATTERN.match(time_str).groups())
         if hours > 23 or minutes > 59:
             logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
             await message.answer(
@@ -784,9 +751,9 @@ async def process_manual_end_time(message: Message, state: FSMContext):
             return
         time_str = f"{hours:02d}:{minutes:02d}"
         data = await state.get_data()
-        end_date = data.get("end_date")
+        end_date = data.get("end_date") or (data.get("updated_fields", {}).get("end_datetime") or datetime.now(MOSCOW_TZ)).date()
         end_datetime = datetime.strptime(f"{end_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
-        start_datetime = data.get("start_datetime")
+        start_datetime = data.get("start_datetime") or (data.get("updated_fields", {}).get("start_datetime") or datetime.now(MOSCOW_TZ))
         
         if end_datetime <= start_datetime:
             logger.warning(f"User {message.from_user.id} selected end time {time_str} not after start time")
@@ -796,10 +763,17 @@ async def process_manual_end_time(message: Message, state: FSMContext):
             )
             return
         
-        await state.update_data(end_datetime=end_datetime)
-        await state.set_state(PromotionForm.waiting_for_discount_or_bonus)
+        logger.info(f"User {message.from_user.id} selected end_datetime: {end_datetime}")
+        updated_fields = data.get("updated_fields", {})
+        updated_fields["end_datetime"] = end_datetime
+        await state.update_data(end_datetime=end_datetime, updated_fields=updated_fields)
+        current_state = await state.get_state()
+        next_state = PromotionForm.waiting_for_discount_or_bonus if current_state.startswith("PromotionForm") else PromotionEditForm.waiting_for_discount_or_bonus
+        await state.set_state(next_state)
         await message.answer(
-            f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500':"
+            f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500'" + 
+            (" (или нажмите 'Пропустить')" if current_state.startswith("PromotionEditForm") else ":"),
+            reply_markup=res_admin_edit_promotion_keyboard() if current_state.startswith("PromotionEditForm") else None
         )
     except ValueError:
         logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
@@ -807,184 +781,11 @@ async def process_manual_end_time(message: Message, state: FSMContext):
             f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
             reply_markup=get_time_keyboard(prefix="promo_")
         )
-
-# Обработчики ручного ввода времени для редактирования акции
-@RA_promotion_router.message(PromotionEditForm.waiting_for_start_time)
-async def process_manual_edit_start_time(message: Message, state: FSMContext):
-    time_str = message.text.strip()
-    match = TIME_PATTERN.match(time_str)
-    if not match:
-        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
-        await message.answer(
-            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
-        return
-
-    try:
-        hours, minutes = map(int, match.groups())
-        if hours > 23 or minutes > 59:
-            logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
-            await message.answer(
-                "Часы должны быть от 0 до 23, минуты от 00 до 59. Введите корректное время:",
-                reply_markup=get_time_keyboard(prefix="promo_")
-            )
-            return
-        time_str = f"{hours:02d}:{minutes:02d}"
-        data = await state.get_data()
-        start_date = data.get("start_date")
-        start_datetime = datetime.strptime(f"{start_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
-        
-        if start_datetime < datetime.now(MOSCOW_TZ):
-            logger.warning(f"User {message.from_user.id} selected past start time: {time_str}")
-            await message.answer(
-                "Время начала не может быть в прошлом. Введите другое время:",
-                reply_markup=get_time_keyboard(prefix="promo_")
-            )
-            return
-        
-        promotion = data.get("promotion")
-        updated_promotion = await update_promotion(
-            promotion_id=promotion["id"],
-            updated_fields={"start_date": start_datetime.isoformat()},
-            bot=None
-        )
-        if updated_promotion:
-            end_datetime = datetime.fromisoformat(promotion["end_date"].replace("Z", "+03:00"))
-            if end_datetime <= start_datetime:
-                logger.warning(f"User {message.from_user.id} set end date {end_datetime} not after new start date {start_datetime}")
-                await message.answer(
-                    "Дата окончания должна быть позже новой даты начала. Пожалуйста, обновите дату окончания:",
-                    reply_markup=get_calendar(prefix="promo_")
-                )
-                await state.set_state(PromotionEditForm.waiting_for_end_date)
-                await state.update_data(start_datetime=start_datetime, end_date=end_datetime)
-                return
-            
-            await state.update_data(promotion=updated_promotion)
-            text = format_promotion_text(updated_promotion)
-            photo_url = updated_promotion.get("photo")
-            if photo_url:
-                try:
-                    await message.answer_photo(
-                        photo=photo_url,
-                        caption=text,
-                        parse_mode="HTML",
-                        reply_markup=res_admin_edit_promotion_keyboard()
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                    await message.answer(
-                        text + "\n\n(Фото недоступно)",
-                        parse_mode="HTML",
-                        reply_markup=res_admin_edit_promotion_keyboard()
-                    )
-            else:
-                await message.answer(
-                    text + "\n\n(Фото отсутствует)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            await state.set_state(PromotionEditForm.choosing_field)
-        else:
-            logger.error(f"Failed to update start time for promotion {promotion['id']}")
-            await message.answer(
-                "Ошибка при обновлении времени начала. Попробуйте снова:",
-                reply_markup=get_time_keyboard(prefix="promo_")
-            )
-    except ValueError:
-        logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
-        await message.answer(
-            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
-
-@RA_promotion_router.message(PromotionEditForm.waiting_for_end_time)
-async def process_manual_edit_end_time(message: Message, state: FSMContext):
-    time_str = message.text.strip()
-    match = TIME_PATTERN.match(time_str)
-    if not match:
-        logger.warning(f"User {message.from_user.id} provided invalid time format: {time_str}")
-        await message.answer(
-            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
-        return
-
-    try:
-        hours, minutes = map(int, match.groups())
-        if hours > 23 or minutes > 59:
-            logger.warning(f"User {message.from_user.id} provided out-of-range time: {time_str}")
-            await message.answer(
-                "Часы должны быть от 0 до 23, минуты от 00 до 59. Введите корректное время:",
-                reply_markup=get_time_keyboard(prefix="promo_")
-            )
-            return
-        time_str = f"{hours:02d}:{minutes:02d}"
-        data = await state.get_data()
-        end_date = data.get("end_date")
-        end_datetime = datetime.strptime(f"{end_date.strftime('%Y-%m-%d')} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=MOSCOW_TZ)
-        promotion = data.get("promotion")
-        start_datetime = datetime.fromisoformat(promotion["start_date"].replace("Z", "+03:00"))
-        
-        if end_datetime <= start_datetime:
-            logger.warning(f"User {message.from_user.id} selected end time {time_str} not after start time")
-            await message.answer(
-                "Время окончания должно быть позже времени начала. Введите другое время:",
-                reply_markup=get_time_keyboard(prefix="promo_")
-            )
-            return
-        
-        updated_promotion = await update_promotion(
-            promotion_id=promotion["id"],
-            updated_fields={"end_date": end_datetime.isoformat()},
-            bot=None
-        )
-        if updated_promotion:
-            await state.update_data(promotion=updated_promotion)
-            text = format_promotion_text(updated_promotion)
-            photo_url = updated_promotion.get("photo")
-            if photo_url:
-                try:
-                    await message.answer_photo(
-                        photo=photo_url,
-                        caption=text,
-                        parse_mode="HTML",
-                        reply_markup=res_admin_edit_promotion_keyboard()
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                    await message.answer(
-                        text + "\n\n(Фото недоступно)",
-                        parse_mode="HTML",
-                        reply_markup=res_admin_edit_promotion_keyboard()
-                    )
-            else:
-                await message.answer(
-                    text + "\n\n(Фото отсутствует)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            await state.set_state(PromotionEditForm.choosing_field)
-        else:
-            logger.error(f"Failed to update end time for promotion {promotion['id']}")
-            await message.answer(
-                "Ошибка при обновлении времени окончания. Попробуйте снова:",
-                reply_markup=get_time_keyboard(prefix="promo_")
-            )
-    except ValueError:
-        logger.error(f"User {message.from_user.id} provided invalid time format: {time_str}")
-        await message.answer(
-            f"Неверный формат времени: '{time_str}'. Введите время в формате ЧЧ:ММ (например, 15:30):",
-            reply_markup=get_time_keyboard(prefix="promo_")
-        )
-
 # =================================================================================================
-# Обработчики редактирования и удаления мероприятий
+# Обработчики редактирования акций
 # =================================================================================================
-
-# Начинает процесс редактирования акции
 @RA_promotion_router.message(F.text == "Изменить акцию")
+@resident_required
 async def edit_promotion_start(message: Message, state: FSMContext):
     logger.info(f"User {message.from_user.id} started editing a promotion")
     data = await state.get_data()
@@ -1007,8 +808,8 @@ async def edit_promotion_start(message: Message, state: FSMContext):
         reply_markup=builder.as_markup(resize_keyboard=True)
     )
 
-# Выбирает акцию для редактирования
 @RA_promotion_router.message(F.text.startswith("🖋️ "))
+@resident_required
 async def edit_promotion_select(message: Message, state: FSMContext):
     promotion_title = message.text[2:].strip()
     promotion = await get_promotion_by_title(promotion_title, state)
@@ -1018,9 +819,12 @@ async def edit_promotion_select(message: Message, state: FSMContext):
         await message.answer("Не удалось найти акцию.")
         return
 
-    await clear_state_except_resident_id(state)
-    await state.set_state(PromotionEditForm.choosing_field)
-    await state.update_data(promotion=promotion)
+    data = await state.get_data()
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
+    await state.clear()
+    await state.update_data(resident_id=resident_id, resident_name=resident_name, promotion=promotion, updated_fields={})
+    await state.set_state(PromotionEditForm.waiting_for_title)
 
     current_promotion_text = (
         f"Название: {promotion['title']}\n"
@@ -1028,6 +832,7 @@ async def edit_promotion_select(message: Message, state: FSMContext):
         f"Дата начала: {format_datetime(promotion.get('start_date'))}\n"
         f"Дата окончания: {format_datetime(promotion.get('end_date'))}\n"
         f"Ссылка для участия: {promotion['url']}\n"
+        f"{promotion['discount_or_bonus'].capitalize()}: {promotion['discount_or_bonus_value']}{'%' if promotion['discount_or_bonus'] == 'скидка' else ''}\n"
     )
 
     photo_url = promotion.get("photo")
@@ -1035,341 +840,236 @@ async def edit_promotion_select(message: Message, state: FSMContext):
         try:
             await message.answer_photo(
                 photo=photo_url,
-                caption=current_promotion_text,
+                caption=f"Вы выбрали акцию:\n\n{current_promotion_text}\n\nВведите новое название (или нажмите 'Пропустить' для сохранения текущего):",
                 parse_mode="Markdown",
                 reply_markup=res_admin_edit_promotion_keyboard()
             )
         except Exception as e:
             logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
             await message.answer(
-                current_promotion_text + "\n\n(Фото недоступно)",
+                f"Вы выбрали акцию:\n\n{current_promotion_text}\n\n(Фото недоступно)\n\nВведите новое название (или нажмите 'Пропустить' для сохранения текущего):",
                 reply_markup=res_admin_edit_promotion_keyboard()
             )
     else:
         await message.answer(
-            current_promotion_text + "\n\n(Фото отсутствует)",
+            f"Вы выбрали акцию:\n\n{current_promotion_text}\n\n(Фото отсутствует)\n\nВведите новое название (или нажмите 'Пропустить' для сохранения текущего):",
             reply_markup=res_admin_edit_promotion_keyboard()
         )
 
-# Начинает редактирование названия акции
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить название")
-async def edit_promotion_title(message: Message, state: FSMContext):
-    await message.answer("Введите новое название:", reply_markup=res_admin_cancel_keyboard())
-    await state.set_state(PromotionEditForm.waiting_for_title)
+@RA_promotion_router.message(F.text.lower() == "пропустить")
+@resident_required
+async def skip_edit_field(message: Message, state: FSMContext, bot: Bot):
+    current_state = await state.get_state()
 
-# Начинает редактирование фото акции
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить фото")
-async def edit_promotion_photo(message: Message, state: FSMContext):
-    await message.answer("Отправьте новое фото:", reply_markup=res_admin_cancel_keyboard())
-    await state.set_state(PromotionEditForm.waiting_for_photo)
+    next_prompt_map = {
+        PromotionEditForm.waiting_for_title.state: ("Отправьте новое фото", PromotionEditForm.waiting_for_photo),
+        PromotionEditForm.waiting_for_photo.state: ("Введите новое описание", PromotionEditForm.waiting_for_description),
+        PromotionEditForm.waiting_for_description.state: ("Выберите новую дату начала", PromotionEditForm.waiting_for_start_date),
+        PromotionEditForm.waiting_for_start_date.state: ("Введите новое время начала", PromotionEditForm.waiting_for_start_time),
+        PromotionEditForm.waiting_for_start_time.state: ("Выберите дату окончания", PromotionEditForm.waiting_for_end_date),
+        PromotionEditForm.waiting_for_end_date.state: ("Введите время окончания", PromotionEditForm.waiting_for_end_time),
+        PromotionEditForm.waiting_for_end_time.state: ("Введите скидку или бонус", PromotionEditForm.waiting_for_discount_or_bonus),
+        PromotionEditForm.waiting_for_discount_or_bonus.state: ("Введите ссылку", PromotionEditForm.waiting_for_url),
+    }
 
-# Начинает редактирование описания акции
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить описание")
-async def edit_promotion_description(message: Message, state: FSMContext):
-    await message.answer("Введите новое описание:", reply_markup=res_admin_cancel_keyboard())
-    await state.set_state(PromotionEditForm.waiting_for_description)
+    if current_state in next_prompt_map:
+        next_prompt, next_state = next_prompt_map[current_state]
+        await state.set_state(next_state)
+        if next_state in {PromotionEditForm.waiting_for_start_date, PromotionEditForm.waiting_for_end_date}:
+            await message.answer(f"{next_prompt} (или нажмите 'Пропустить')", reply_markup=get_calendar(prefix="promo_"))
+        elif next_state in {PromotionEditForm.waiting_for_start_time, PromotionEditForm.waiting_for_end_time}:
+            await message.answer(f"{next_prompt} (или нажмите 'Пропустить')", reply_markup=get_time_keyboard(prefix="promo_"))
+        else:
+            await message.answer(f"{next_prompt} (или нажмите 'Пропустить')", reply_markup=res_admin_edit_promotion_keyboard())
+        return
 
-# Начинает редактирование даты начала акции
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить дату начала")
-async def edit_promotion_start_date(message: Message, state: FSMContext):
-    await message.answer("Выберите новую дату начала:", reply_markup=get_calendar(prefix="promo_"))
-    await state.set_state(PromotionEditForm.waiting_for_start_date)
+    elif current_state == PromotionEditForm.waiting_for_url.state:
+        return await skip_promotion_url(message, state, bot=bot)
 
-# Начинает редактирование даты окончания акции
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить дату окончания")
-async def edit_promotion_end_date(message: Message, state: FSMContext):
-    await message.answer("Выберите новую дату окончания:", reply_markup=get_calendar(prefix="promo_"))
-    await state.set_state(PromotionEditForm.waiting_for_end_date)
+    await message.answer("Невозможно пропустить этот шаг.")
 
-# Начинает редактирование ссылки акции
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить ссылку")
-async def edit_promotion_url(message: Message, state: FSMContext):
-    await message.answer("Введите новую ссылку:", reply_markup=res_admin_cancel_keyboard())
-    await state.set_state(PromotionEditForm.waiting_for_url)
-
-# Начинает редактирование скидки или бонуса
-@RA_promotion_router.message(PromotionEditForm.choosing_field, F.text == "Изменить скидку/бонус")
-async def edit_promotion_discount_or_bonus(message: Message, state: FSMContext):
-    await message.answer(
-        "Введите новую скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500':",
-        reply_markup=res_admin_cancel_keyboard()
-    )
-    await state.set_state(PromotionEditForm.waiting_for_discount_or_bonus)
-
-# Обрабатывает ввод нового названия акции
 @RA_promotion_router.message(PromotionEditForm.waiting_for_title)
+@resident_required
 async def process_promotion_title(message: Message, state: FSMContext):
     new_title = message.text.strip()
     if not new_title:
-        logger.warning(f"User {message.from_user.id} provided empty title for update")
-        await message.answer("Название не может быть пустым.", reply_markup=res_admin_cancel_keyboard())
+        await message.answer("Название не может быть пустым.", reply_markup=res_admin_edit_promotion_keyboard())
         return
+
     data = await state.get_data()
     promotion = data.get("promotion")
     if not promotion:
-        logger.error(f"No promotion data found for user_id={message.from_user.id}")
-        await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
+        await handle_missing_promotion(message, state)
         return
-    updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields={"title": new_title}, bot=None)
-    if updated_promotion:
-        logger.info(f"Promotion {promotion['id']} title updated to '{new_title}'")
-        await state.update_data(promotion=updated_promotion)
-        text = format_promotion_text(updated_promotion)
-        photo_url = updated_promotion.get("photo")
-        if photo_url:
-            try:
-                await message.answer_photo(
-                    photo=photo_url,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            except Exception as e:
-                logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                await message.answer(
-                    text + "\n\n(Фото недоступно)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-        else:
-            await message.answer(
-                text + "\n\n(Фото отсутствует)",
-                parse_mode="HTML",
-                reply_markup=res_admin_edit_promotion_keyboard()
-            )
-        await state.set_state(PromotionEditForm.choosing_field)
-    else:
-        logger.error(f"Failed to update title for promotion {promotion['id']}")
-        await message.answer("Ошибка при обновлении названия. Попробуйте снова.", reply_markup=res_admin_edit_promotion_keyboard())
 
-# Обрабатывает загрузку нового фото акции с валидацией формата
+    updated_fields = data.get("updated_fields", {})
+    updated_fields["title"] = new_title
+    await state.update_data(updated_fields=updated_fields)
+    await state.set_state(PromotionEditForm.waiting_for_photo)
+    await message.answer("Отправьте новое фото (или нажмите 'Пропустить'):", reply_markup=res_admin_edit_promotion_keyboard())
+
 @RA_promotion_router.message(PromotionEditForm.waiting_for_photo)
+@resident_required
 async def process_promotion_photo(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     promotion = data.get("promotion")
     if not promotion:
-        logger.error(f"No promotion data found for user_id={message.from_user.id}")
-        await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
+        await handle_missing_promotion(message, state)
         return
 
     is_valid, result = await validate_photo(message)
     if not is_valid:
-        await message.answer(result, reply_markup=res_admin_cancel_keyboard())
+        await message.answer(result, reply_markup=res_admin_edit_promotion_keyboard())
         return
-    photo_file_id = result
-    updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields={"photo": photo_file_id}, bot=bot)
-    if updated_promotion and isinstance(updated_promotion, dict):
-        logger.info(f"Photo updated for promotion {promotion['id']}")
-        await state.update_data(promotion=updated_promotion)
-        text = format_promotion_text(updated_promotion)
-        photo_url = updated_promotion.get("photo")
-        if photo_url:
-            try:
-                await message.answer_photo(
-                    photo=photo_url,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            except Exception as e:
-                logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                await message.answer(
-                    text + "\n\n(Фото недоступно)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-        else:
-            await message.answer(
-                text + "\n\n(Фото отсутствует)",
-                parse_mode="HTML",
-                reply_markup=res_admin_edit_promotion_keyboard()
-            )
-        await state.set_state(PromotionEditForm.choosing_field)
-    else:
-        logger.error(f"Failed to update photo for promotion {promotion['id']}")
-        await message.answer("Ошибка при обновлении фото. Попробуйте снова.", reply_markup=res_admin_cancel_keyboard())
 
-# Обрабатывает ввод нового описания акции
+    updated_fields = data.get("updated_fields", {})
+    updated_fields["photo"] = result
+    await state.update_data(updated_fields=updated_fields)
+    await state.set_state(PromotionEditForm.waiting_for_description)
+    await message.answer("Введите новое описание (или нажмите 'Пропустить'):", reply_markup=res_admin_edit_promotion_keyboard())
+
 @RA_promotion_router.message(PromotionEditForm.waiting_for_description)
+@resident_required
 async def process_promotion_description(message: Message, state: FSMContext):
     new_description = message.text.strip()
     if not new_description:
-        logger.warning(f"User {message.from_user.id} provided empty description")
-        await message.answer("Описание не может быть пустым.", reply_markup=res_admin_cancel_keyboard())
+        await message.answer("Описание не может быть пустым.", reply_markup=res_admin_edit_promotion_keyboard())
         return
 
     data = await state.get_data()
     promotion = data.get("promotion")
     if not promotion:
-        logger.error(f"No promotion data found for user_id={message.from_user.id}")
-        await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
+        await handle_missing_promotion(message, state)
         return
 
-    updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields={"description": new_description})
-    if updated_promotion:
-        logger.info(f"Description updated for promotion {promotion['id']}")
-        await state.update_data(promotion=updated_promotion)
-        text = format_promotion_text(updated_promotion)
-        photo_url = updated_promotion.get("photo")
-        if photo_url:
-            try:
-                await message.answer_photo(
-                    photo=photo_url,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            except Exception as e:
-                logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                await message.answer(
-                    text + "\n\n(Фото недоступно)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-        else:
-            await message.answer(
-                text + "\n\n(Фото отсутствует)",
-                parse_mode="HTML",
-                reply_markup=res_admin_edit_promotion_keyboard()
-            )
-        await state.set_state(PromotionEditForm.choosing_field)
-    else:
-        logger.error(f"Failed to update description for promotion {promotion['id']}")
-        await message.answer("Ошибка при обновлении описания. Попробуйте снова.", reply_markup=res_admin_edit_promotion_keyboard())
+    updated_fields = data.get("updated_fields", {})
+    updated_fields["description"] = new_description
+    await state.update_data(updated_fields=updated_fields)
+    await state.set_state(PromotionEditForm.waiting_for_start_date)
+    await message.answer("Выберите новую дату начала (или нажмите 'Пропустить'):", reply_markup=get_calendar(prefix="promo_"))
 
-# Обрабатывает ввод новой ссылки акции
-@RA_promotion_router.message(PromotionEditForm.waiting_for_url)
-async def process_promotion_url(message: Message, state: FSMContext):
-    new_url = message.text.strip()
-    if not new_url:
-        logger.warning(f"User {message.from_user.id} provided empty URL")
-        await message.answer("Ссылка не может быть пустой.", reply_markup=res_admin_cancel_keyboard())
-        return
-    if not URL_PATTERN.match(new_url):
-        logger.warning(f"User {message.from_user.id} provided invalid URL format: {new_url}")
-        await message.answer("Неверный формат ссылки. Пожалуйста, введите корректную ссылку:", reply_markup=res_admin_cancel_keyboard())
-        return
-    
-    data = await state.get_data()
-    promotion = data.get("promotion")
-    if not promotion:
-        logger.error(f"No promotion data found for user_id={message.from_user.id}")
-        await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
-        return
-
-    updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields={"url": new_url})
-    if updated_promotion:
-        logger.info(f"URL updated for promotion {promotion['id']}")
-        await state.update_data(promotion=updated_promotion)
-        text = format_promotion_text(updated_promotion)
-        photo_url = updated_promotion.get("photo")
-        if photo_url:
-            try:
-                await message.answer_photo(
-                    photo=photo_url,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            except Exception as e:
-                logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                await message.answer(
-                    text + "\n\n(Фото недоступно)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-        else:
-            await message.answer(
-                text + "\n\n(Фото отсутствует)",
-                parse_mode="HTML",
-                reply_markup=res_admin_edit_promotion_keyboard()
-            )
-        await state.set_state(PromotionEditForm.choosing_field)
-    else:
-        logger.error(f"Failed to update URL for promotion {promotion['id']}")
-        await message.answer("Ошибка при обновлении ссылки. Попробуйте снова.", reply_markup=res_admin_edit_promotion_keyboard())
-
-# Обрабатывает ввод новой скидки или бонуса
 @RA_promotion_router.message(PromotionEditForm.waiting_for_discount_or_bonus)
+@resident_required
 async def process_promotion_discount_or_bonus(message: Message, state: FSMContext):
     input_text = message.text.strip().lower()
-    
     discount_match = DISCOUNT_PATTERN.match(input_text)
     bonus_match = BONUS_PATTERN.match(input_text)
 
+    data = await state.get_data()
     if discount_match:
-        discount_value = float(discount_match.group(1))
-        if discount_value <= 0 or discount_value > 100:
-            logger.warning(f"User {message.from_user.id} provided invalid discount value: {discount_value}")
-            await message.answer(
-                "Значение скидки должно быть от 0 до 100%. Введите корректное значение, например 'Скидка 10%':",
-                reply_markup=res_admin_cancel_keyboard()
-            )
+        value = float(discount_match.group(1))
+        if not (0 < value <= 100):
+            await message.answer("Скидка должна быть от 1 до 100%. Пример: Скидка 10%", reply_markup=res_admin_edit_promotion_keyboard())
             return
-        updated_fields = {"discount_or_bonus": "скидка", "discount_or_bonus_value": discount_value}
+        await state.update_data(updated_fields={**data.get("updated_fields", {}), "discount_or_bonus": "скидка", "discount_or_bonus_value": value})
+
     elif bonus_match:
-        bonus_value = float(bonus_match.group(1))
-        if bonus_value <= 0:
-            logger.warning(f"User {message.from_user.id} provided invalid bonus value: {bonus_value}")
-            await message.answer(
-                "Значение бонуса должно быть больше 0. Введите корректное значение, например 'Бонусов 500':",
-                reply_markup=res_admin_cancel_keyboard()
-            )
+        value = float(bonus_match.group(1))
+        if value <= 0:
+            await message.answer("Бонус должен быть больше 0. Пример: Бонусов 500", reply_markup=res_admin_edit_promotion_keyboard())
             return
-        updated_fields = {"discount_or_bonus": "бонус", "discount_or_bonus_value": bonus_value}
+        await state.update_data(updated_fields={**data.get("updated_fields", {}), "discount_or_bonus": "бонус", "discount_or_bonus_value": value})
+
     else:
-        logger.warning(f"User {message.from_user.id} provided invalid discount/bonus format: {input_text}")
-        await message.answer(
-            "Неверный формат. Введите 'Скидка 10%' или 'Бонусов 500':",
-            reply_markup=res_admin_cancel_keyboard()
-        )
+        await message.answer("Неверный формат. Пример: Скидка 10% или Бонусов 500", reply_markup=res_admin_edit_promotion_keyboard())
+        return
+
+    await state.set_state(PromotionEditForm.waiting_for_url)
+    await message.answer("Введите новую ссылку (или нажмите 'Пропустить'):", reply_markup=res_admin_edit_promotion_keyboard())
+
+@RA_promotion_router.message(PromotionEditForm.waiting_for_url)
+@resident_required
+async def process_promotion_url(message: Message, state: FSMContext, bot: Bot):
+    new_url = message.text.strip()
+    if not new_url:
+        await message.answer("Ссылка не может быть пустой.", reply_markup=res_admin_edit_promotion_keyboard())
+        return
+    if not URL_PATTERN.match(new_url):
+        await message.answer("Неверный формат ссылки. Введите корректную ссылку.", reply_markup=res_admin_edit_promotion_keyboard())
         return
 
     data = await state.get_data()
     promotion = data.get("promotion")
     if not promotion:
-        logger.error(f"No promotion data found for user_id={message.from_user.id}")
-        await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_cancel_keyboard())
-        await state.set_state(PromotionEditForm.choosing_field)
+        await handle_missing_promotion(message, state)
         return
 
-    updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields=updated_fields)
+    updated_fields = data.get("updated_fields", {})
+    updated_fields["url"] = new_url
+
+    if "start_datetime" in updated_fields:
+        updated_fields["start_date"] = updated_fields.pop("start_datetime").isoformat()
+    if "end_datetime" in updated_fields:
+        updated_fields["end_date"] = updated_fields.pop("end_datetime").isoformat()
+
+    updated_promotion = await update_promotion(promotion["id"], updated_fields, bot=bot)
+    await finish_edit_promotion(message, state, updated_promotion, promotion, data)
+
+@RA_promotion_router.message(PromotionEditForm.waiting_for_url, F.text == "Пропустить")
+@resident_required
+async def skip_promotion_url(message: Message, state: FSMContext, bot: Bot):
+    data = await state.get_data()
+    promotion = data.get("promotion")
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
+    if not promotion:
+        logger.error(f"No promotion data found for user_id={message.from_user.id}")
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=resident_name)
+        await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
+        return
+
+    updated_fields = data.get("updated_fields", {})
+    # Convert datetime objects to ISO format for API
+    if "start_datetime" in updated_fields:
+        updated_fields["start_date"] = updated_fields.pop("start_datetime").isoformat()
+    if "end_datetime" in updated_fields:
+        updated_fields["end_date"] = updated_fields.pop("end_datetime").isoformat()
+
+    updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields=updated_fields, bot=bot)
     if updated_promotion:
-        logger.info(f"Discount/bonus updated for promotion {promotion['id']}")
+        logger.info(f"Promotion {promotion['id']} updated successfully with fields: {updated_fields.keys()}")
         await state.update_data(promotion=updated_promotion)
         text = format_promotion_text(updated_promotion)
-        photo_url = updated_promotion.get("photo")
-        if photo_url:
-            try:
-                await message.answer_photo(
-                    photo=photo_url,
-                    caption=text,
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-            except Exception as e:
-                logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
-                await message.answer(
-                    text + "\n\n(Фото недоступно)",
-                    parse_mode="HTML",
-                    reply_markup=res_admin_edit_promotion_keyboard()
-                )
-        else:
-            await message.answer(
-                text + "\n\n(Фото отсутствует)",
-                parse_mode="HTML",
-                reply_markup=res_admin_edit_promotion_keyboard()
-            )
-        await state.set_state(PromotionEditForm.choosing_field)
     else:
-        logger.error(f"Failed to update discount/bonus for promotion {promotion['id']}")
-        await message.answer(
-            "Ошибка при обновлении скидки/бонуса. Попробуйте еще раз.",
-            reply_markup=res_admin_edit_promotion_keyboard()
-        )
+        logger.error(f"Failed to update promotion {promotion['id']}")
+        await message.answer("Ошибка при обновлении акции. Попробуйте снова.", reply_markup=res_admin_promotion_keyboard())
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=resident_name)
+        return
 
-# Начинает процесс удаления акции
+    photo_url = updated_promotion.get("photo")
+    if photo_url:
+        try:
+            await message.answer_photo(
+                photo=photo_url,
+                caption=f"{text}\n\nРедактирование завершено. Ожидайте подтверждения администратора.",
+                parse_mode="HTML",
+                reply_markup=res_admin_promotion_keyboard()
+            )
+        except Exception as e:
+            logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
+            await message.answer(
+                f"{text}\n\n(Фото недоступно)\n\nРедактирование завершено. Ожидайте подтверждения администратора.",
+                parse_mode="HTML",
+                reply_markup=res_admin_promotion_keyboard()
+            )
+    else:
+        await message.answer(
+            f"{text}\n\n(Фото отсутствует)\n\nРедактирование завершено. Ожидайте подтверждения администратора.",
+            parse_mode="HTML",
+            reply_markup=res_admin_promotion_keyboard()
+        )
+    await state.set_state(PromotionEditForm.waiting_for_title)
+
+# =================================================================================================
+# Обработчики удаления акций
+# =================================================================================================
+
 @RA_promotion_router.message(F.text == "Удалить акцию")
+@resident_required
 async def delete_promotion_start(message: Message, state: FSMContext):
     logger.info(f"User {message.from_user.id} started deleting a promotion")
     data = await state.get_data()
@@ -1392,8 +1092,8 @@ async def delete_promotion_start(message: Message, state: FSMContext):
         reply_markup=builder.as_markup(resize_keyboard=True)
     )
 
-# Выбирает акцию для удаления
 @RA_promotion_router.message(F.text.startswith("🗑 "))
+@resident_required
 async def delete_promotion_select(message: Message, state: FSMContext):
     promotion_title = message.text[2:].strip()
     promotion = await get_promotion_by_title(promotion_title, state)
@@ -1402,8 +1102,13 @@ async def delete_promotion_select(message: Message, state: FSMContext):
         await message.answer("Не удалось найти акцию.")
         return
 
-    await state.update_data(promotion=promotion)
+    data = await state.get_data()
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
+    await state.clear()
+    await state.update_data(resident_id=resident_id, resident_name=resident_name, promotion=promotion)
     await state.set_state(DeletePromotionForm.waiting_for_confirmation)
+
     current_promotion_text = (
         f"Название: {promotion['title']}\n"
         f"Описание: {promotion['description']}\n"
@@ -1429,7 +1134,7 @@ async def delete_promotion_select(message: Message, state: FSMContext):
         except Exception as e:
             logger.error(f"Failed to send photo for promotion {promotion['id']}: {e}")
             await message.answer(
-                f"Вы выбрали акцию:\n\n{current_promotion_text}\n\n(Фото недоступно)\n\nВы действительно хотите удалить эту акцию?",
+                f"Вы выбрали акцию:\n{current_promotion_text}\n\n(Фото недоступно)\n\nВы действительно хотите удалить эту акцию?",
                 reply_markup=builder.as_markup(resize_keyboard=True)
             )
     else:
@@ -1438,13 +1143,18 @@ async def delete_promotion_select(message: Message, state: FSMContext):
             reply_markup=builder.as_markup(resize_keyboard=True)
         )
 
-# Подтверждает удаление акции
 @RA_promotion_router.message(F.text == "Убрать", StateFilter(DeletePromotionForm.waiting_for_confirmation))
+@resident_required
 async def confirm_delete_promotion(message: Message, state: FSMContext):
     data = await state.get_data()
     promotion = data.get("promotion")
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
     if not promotion:
         logger.error(f"No promotion data found for user_id={message.from_user.id}")
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=resident_name)
         await message.answer("Ошибка: акция не найдена.")
         return
 
@@ -1455,4 +1165,6 @@ async def confirm_delete_promotion(message: Message, state: FSMContext):
     else:
         logger.error(f"Failed to delete promotion {promotion['id']} for user_id={message.from_user.id}")
         await message.answer("Не удалось удалить акцию. Попробуйте снова.", reply_markup=res_admin_promotion_keyboard())
-    await clear_state_except_resident_id(state)
+    await state.clear()
+    if resident_id:
+        await state.update_data(resident_id=resident_id, resident_name=resident_name)

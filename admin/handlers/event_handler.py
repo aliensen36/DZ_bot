@@ -1,7 +1,6 @@
 import aiohttp
-import re
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from pydantic import ValidationError
 from aiogram.exceptions import TelegramBadRequest
 from aiogram import Bot, F, Router
@@ -9,14 +8,14 @@ from aiogram.fsm.state import StatesGroup, State
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import StateFilter
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
-from aiogram.types import ContentType
 from aiogram.fsm.context import FSMContext
 from data.config import config_settings
 from admin.keyboards.admin_reply import events_management_keyboard, admin_keyboard, cancel_keyboard, edit_event_keyboard
 from data.url import url_event
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
-from utils.dowload_photo import download_photo_from_telegram
-from utils.calendar import get_calendar, get_time_keyboard
+from utils.photo import download_photo_from_telegram, validate_photo
+from utils.calendar import get_calendar, get_time_keyboard, format_datetime
+from utils.constants import URL_PATTERN, MOSCOW_TZ, TIME_PATTERN
 
 # Настройка логирования
 logger = logging.getLogger(__name__)
@@ -26,18 +25,6 @@ admin_event_router.message.filter(
     ChatTypeFilter("private"),
     IsGroupAdmin([ADMIN_CHAT_ID], show_message=False)
 )
-
-# Константы
-URL_PATTERN = re.compile(
-    r'^(https?://)?'
-    r'([a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}'
-    r'(:\d+)?'
-    r'(/[\w\-._~:/?#[\]@!$&\'()*+,;=]*)?$'
-)
-MOSCOW_TZ = timezone(timedelta(hours=3))
-TIME_PATTERN = re.compile(r'^\s*(\d{1,2}):(\d{2})\s*$')
-MAX_PHOTO_SIZE = 10 * 1024 * 1024  # 10MB
-ALLOWED_PHOTO_TYPES = ['image/jpeg', 'image/png']
 
 # =================================================================================================
 # Состояния FSM
@@ -70,33 +57,6 @@ class EditEventForm(StatesGroup):
 
 class DeleteEventForm(StatesGroup):
     waiting_for_confirmation = State()
-
-# =================================================================================================
-# Утилитные функции
-# =================================================================================================
-
-# Форматирует строку ISO-даты в формат DD.MM.YYYY HH:MM
-def format_datetime(dt_str: str) -> str:
-    try:
-        dt = datetime.fromisoformat(dt_str.replace("Z", "+03:00"))
-        return dt.strftime("%d.%m.%Y %H:%M")
-    except Exception as e:
-        logger.error(f"Failed to format datetime: {dt_str}, error: {e}")
-        return dt_str or "-"
-
-# Проверяет, является ли сообщение фото, и соответствует ли оно требованиям (формат JPG/PNG, размер до 10MB)
-async def validate_photo(message: Message) -> tuple[bool, str]:
-    if message.content_type != ContentType.PHOTO:
-        logger.warning(f"Invalid content type: {message.content_type}")
-        return False, "Пожалуйста, отправьте изображение в формате JPG или PNG."
-    if not message.photo:
-        logger.warning("No photo received")
-        return False, "Фото не получено. Пожалуйста, отправьте изображение."
-    photo = message.photo[-1]
-    if photo.file_size > MAX_PHOTO_SIZE:
-        logger.warning(f"Photo size {photo.file_size} exceeds limit {MAX_PHOTO_SIZE}")
-        return False, "Фото слишком большое. Максимальный размер: 10 МБ."
-    return True, photo.file_id
 
 # =================================================================================================
 # Функции для работы с API

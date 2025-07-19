@@ -38,15 +38,10 @@ def res_admin_cancel_keyboard():
     builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)
 
+# Создаёт reply-клавиатуру для редактирования акция в админ-панели резидента
 def res_admin_edit_promotion_keyboard():
     builder = ReplyKeyboardBuilder()
-    builder.button(text="Изменить название")
-    builder.button(text="Изменить фото")
-    builder.button(text="Изменить описание")
-    builder.button(text="Изменить дату начала")
-    builder.button(text="Изменить дату окончания")
-    builder.button(text="Изменить скидку/бонус")
-    builder.button(text="Изменить ссылку")
-    builder.button(text="↩ Обратно")
-    builder.adjust(2)
+    builder.button(text="Пропустить")
+    builder.button(text="Сбросить")
+    builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)
