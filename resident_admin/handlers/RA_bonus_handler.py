@@ -258,11 +258,13 @@ async def process_transaction_price(message: Message, state: FSMContext):
                                 f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                 f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
                             )
-                        await state.clear()
+                        await state.set_state(None)
                     else:
                         error_data = await resp.json()
                         error_msg = error_data.get('error', 'Неизвестная ошибка при начислении баллов')
-                        await message.answer(f"Ошибка: {error_msg}. Попробуйте ещё раз:")
+                        await message.answer(f"Ошибка:\n"
+                                             f"<b>{error_msg}</b>.\n"
+                                             f"Попробуйте ещё раз.")
                         await state.set_state(TransactionFSM.price)
             elif transaction_type == "deduct":
                 url = url_point_transactions_deduct
@@ -277,7 +279,7 @@ async def process_transaction_price(message: Message, state: FSMContext):
                             await message.answer_photo(
                                 photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
                                 caption=(
-                                    f"Списано <b>{points}</b> баллов\n\n"
+                                    f"Списано баллов: <b>{points}</b>\n\n"
                                     f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                     f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
                                 )
@@ -285,15 +287,17 @@ async def process_transaction_price(message: Message, state: FSMContext):
                         else:
                             # Если изображение не удалось получить, отправляем только текст
                             await message.answer(
-                                f"Списано <b>{points}</b> баллов\n\n"
+                                f"Списано баллов: <b>{points}</b>\n\n"
                                 f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                 f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
                             )
-                        await state.clear()
+                        await state.set_state(None)
                     else:
                         error_data = await resp.json()
                         error_msg = error_data.get('error', 'Неизвестная ошибка при списании баллов')
-                        await message.answer(f"Ошибка: {error_msg}. Попробуйте ещё раз:")
+                        await message.answer(f"Ошибка:\n"
+                                             f"<b>{error_msg}</b>.\n"
+                                             f"Попробуйте ещё раз.")
                         await state.set_state(TransactionFSM.price)
     except aiohttp.ClientError as e:
         logger.error(f"Error processing transaction {transaction_type} for card_id={card_id}: {e}")
