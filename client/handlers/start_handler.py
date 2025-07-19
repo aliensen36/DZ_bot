@@ -2,7 +2,7 @@ import logging
 
 import aiohttp
 from aiogram import Router, types, F
-from aiogram.types import Message
+from aiogram.types import Message as AiogramMessage
 from aiogram.filters import CommandStart
 from aiohttp import ClientConnectorError, ServerTimeoutError
 from aiogram.fsm.context import FSMContext
@@ -26,7 +26,7 @@ class Form(StatesGroup):
 
 
 @start_router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: AiogramMessage, state: FSMContext):
     """Обрабатывает команду /start для регистрации или приветствия пользователя.
 
     Args:
@@ -35,7 +35,8 @@ async def cmd_start(message: Message, state: FSMContext):
     Notes:
         Выполняет POST-запрос к API для регистрации и отправляет приветствие в зависимости от статуса (200 или 201).
     """
-    referral_code = message.get_args()
+    parts = message.text.split()
+    referral_code = parts[1] if len(parts) > 1 else None
     
     # Данные пользователя, отправляемые при регистрации в API
     user_data = {
@@ -224,7 +225,7 @@ async def process_choice(callback: types.CallbackQuery, state: FSMContext):
 
 
 @start_router.message(F.text == "/help")
-async def help_command(message: Message):
+async def help_command(message: AiogramMessage):
     help_text = (
     "👋 *Привет!* Я помогу тебе понять, как пользоваться ботом.\n\n"
     "*Что ты можешь сделать прямо сейчас:*\n\n"
