@@ -1,4 +1,4 @@
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone, timedelta, date
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from calendar import monthcalendar
 
@@ -9,6 +9,8 @@ def get_calendar(year=None, month=None, prefix=""):
     now = datetime.now(MOSCOW_TZ)
     year = year or now.year
     month = month or now.month
+
+    today = date.today()
 
     # Проверка корректности года и месяца
     if year < 1900 or year > 9999:  # Ограничение на разумный диапазон лет
@@ -44,11 +46,17 @@ def get_calendar(year=None, month=None, prefix=""):
             if day == 0:
                 row.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
             else:
-                date_str = f"{day:02d}.{month:02d}.{year}"
-                row.append(InlineKeyboardButton(text=str(day), callback_data=f"{prefix}select_date:{date_str}"))
+                button_date = date(year, month, day)
+                if button_date < today:
+                    # Прошедшие дни — неактивные
+                    row.append(InlineKeyboardButton(text=" ", callback_data="ignore"))
+                else:
+                    date_str = f"{day:02d}.{month:02d}.{year}"
+                    row.append(InlineKeyboardButton(text=str(day), callback_data=f"{prefix}select_date:{date_str}"))
         keyboard.inline_keyboard.append(row)
     
     return keyboard
+
 
 def get_time_keyboard(prefix=""):
     """Генерирует клавиатуру времени с указанным префиксом для callback'ов."""
@@ -58,3 +66,12 @@ def get_time_keyboard(prefix=""):
     keyboard.inline_keyboard.append(time_buttons)
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="Ввести вручную", callback_data=f"{prefix}manual_time")])
     return keyboard
+
+
+# Форматирует дату и время в строковый формат
+def format_datetime(dt_str):
+    try:
+        dt = datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return dt_str or "-"
