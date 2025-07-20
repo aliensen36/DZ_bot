@@ -7,7 +7,7 @@ main_kb = ReplyKeyboardMarkup(
         [KeyboardButton(text="Карта лояльности")],
         [KeyboardButton(
             text="Открыть приложение",
-            web_app=WebAppInfo(url="https://design-zavod.tech/")
+            web_app=WebAppInfo(url="https://design-zavod.tech/?mode=compact")
         )
         ]
     ],
