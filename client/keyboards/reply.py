@@ -5,8 +5,10 @@ main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Личный кабинет")],
         [KeyboardButton(text="Карта лояльности")],
-        [KeyboardButton(text="Открыть приложение",
-                        web_app=WebAppInfo(url="https://t.me/DZavodBot/?startapp&addToHomeScreen"))]
+        [KeyboardButton(
+            text="Открыть приложение",
+            web_app=WebAppInfo(url="https://t.me/DZavodBot/?startapp&addToHomeScreen")
+        )]
     ],
     resize_keyboard=True,
     persistent=True,
