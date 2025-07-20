@@ -5,16 +5,12 @@ main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Личный кабинет")],
         [KeyboardButton(text="Карта лояльности")],
-        [KeyboardButton(
-            text="Открыть приложение",
-            web_app=WebAppInfo(url="https://t.me/DZavodBot?startapp")
-        )]
+        [KeyboardButton(text="Открыть приложение",)]
     ],
     resize_keyboard=True,
     persistent=True,
     input_field_placeholder="Выберите действие"
 )
-
 # Клавиатура: Редактирование данных
 edit_data_keyboard = ReplyKeyboardMarkup(
     keyboard=[

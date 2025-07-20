@@ -240,3 +240,19 @@ async def help_command(message: AiogramMessage):
     )
     
     await message.answer(help_text, parse_mode="Markdown")
+
+# Хендлер на реплай-кнопку "Открыть приложение"
+@start_router.message(F.text == "Открыть приложение")
+async def send_webapp_button(message: Message):
+    webapp_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="Перейти в мини-приложение",
+                web_app=WebAppInfo(url="https://design-zavod.tech/")
+            )]
+        ]
+    )
+    await message.answer(
+        "Для перехода в приложение нажмите кнопку ниже.",
+        reply_markup=webapp_kb
+    )
