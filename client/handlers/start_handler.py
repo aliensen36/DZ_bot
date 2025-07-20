@@ -2,7 +2,7 @@ import logging
 
 import aiohttp
 from aiogram import Router, types, F
-from aiogram.types import Message as AiogramMessage
+from aiogram.types import Message as AiogramMessage, Message, InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo
 from aiogram.filters import CommandStart
 from aiohttp import ClientConnectorError, ServerTimeoutError
 from aiogram.fsm.context import FSMContext
@@ -240,3 +240,20 @@ async def help_command(message: AiogramMessage):
     )
     
     await message.answer(help_text, parse_mode="Markdown")
+
+
+# Хендлер на реплай-кнопку
+@start_router.message(F.text == "Открыть приложение")
+async def send_webapp_button(message: Message):
+    webapp_kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(
+                text="Перейти в мини-приложение",
+                web_app=WebAppInfo(url="https://design-zavod.tech/")
+            )]
+        ]
+    )
+    await message.answer(
+        "Для перехода в приложение нажмите кнопку ниже.",
+        reply_markup=webapp_kb
+    )

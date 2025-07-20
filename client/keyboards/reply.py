@@ -5,11 +5,7 @@ main_kb = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="Личный кабинет")],
         [KeyboardButton(text="Карта лояльности")],
-        [KeyboardButton(
-            text="Открыть приложение",
-            web_app=WebAppInfo(url="https://design-zavod.tech/?mode=compact")
-        )
-        ]
+        [KeyboardButton(text="Открыть приложение",)]
     ],
     resize_keyboard=True,
     persistent=True,
