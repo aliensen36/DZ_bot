@@ -7,7 +7,7 @@ main_kb = ReplyKeyboardMarkup(
         [KeyboardButton(text="Карта лояльности")],
         [KeyboardButton(
             text="Открыть приложение",
-            web_app=WebAppInfo(url="https://t.me/DZavodBot/?startapp&addToHomeScreen")
+            web_app=WebAppInfo(url="https://t.me/DZavodBot?startapp")
         )]
     ],
     resize_keyboard=True,
