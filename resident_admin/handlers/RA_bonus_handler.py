@@ -7,7 +7,7 @@ from data.config import config_settings
 from data.url import url_point_transactions_deduct, url_point_transactions_accrue, url_resident
 from resident_admin.keyboards.res_admin_reply import back_to_menu_kb, res_admin_keyboard
 from resident_admin.services.point_transactions import find_user_by_card_number, get_card_number_by_user, \
-    find_user_by_phone, get_card_id_by_tg_id, get_resident_id_by_user_id, get_user_id_by_tg_id
+    find_user_by_phone, get_card_id_by_tg_id, get_user_id_by_tg_id
 from resident_admin.services.resident_required import resident_required
 from utils.filters import ChatTypeFilter
 from aiogram.fsm.context import FSMContext
@@ -73,7 +73,8 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                 card_id = await get_card_id_by_tg_id(user_data['tg_id'])
                 if card_id is None:
                     await message.answer(
-                        "Не удалось получить данные карты. Попробуйте еще раз или введите номер телефона:"
+                        "Не удалось получить данные карты. Попробуйте еще раз или введите номер телефона:",
+                          reply_markup=back_to_menu_kb
                     )
                     await state.set_state(TransactionFSM.number)
                     return
@@ -86,10 +87,13 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                         card_number=card_number,
                         card_id=card_id
                     )
+                    await message.answer("Для возврата в главное меню нажмите кнопку 'Назад'.",
+                                         reply_markup=back_to_menu_kb)
                     # Отправляем изображение карты отдельно
                     await message.answer_photo(
                         photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
-                        caption=f"Карта найдена: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                        caption=f"Карта найдена: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})",
+                        reply_markup=back_to_menu_kb
                     )
                     # Отправляем сообщение с выбором типа операции
                     await message.answer(
@@ -99,17 +103,20 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                     await state.set_state(TransactionFSM.transaction_type)
                 else:
                     await message.answer(
-                        "Не удалось сгенерировать изображение карты. Попробуйте еще раз или введите номер телефона:"
+                        "Не удалось сгенерировать изображение карты. Попробуйте еще раз или введите номер телефона:",
+                        reply_markup=back_to_menu_kb
                     )
                     await state.set_state(TransactionFSM.number)
             else:
                 await message.answer(
-                    "Карта не найдена для данного пользователя. Попробуйте ввести номер карты (формат: 123 456):"
+                    "Карта не найдена для данного пользователя. Попробуйте ввести номер карты (формат: 123 456):",
+                    reply_markup=back_to_menu_kb
                 )
                 await state.set_state(TransactionFSM.number)
         else:
             await message.answer(
-                "Пользователь не найден по номеру телефона. Попробуйте ввести номер карты (формат: 123 456):"
+                "Пользователь не найден по номеру телефона. Попробуйте ввести номер карты (формат: 123 456):",
+                reply_markup=back_to_menu_kb
             )
             await state.set_state(TransactionFSM.number)
     elif re.match(card_number_pattern, input_text):
@@ -121,7 +128,8 @@ async def process_phone_or_card(message: Message, state: FSMContext):
             card_id = await get_card_id_by_tg_id(user_data['tg_id'])
             if card_id is None:
                 await message.answer(
-                    "Не удалось получить данные карты. Попробуйте еще раз или введите номер телефона:"
+                    "Не удалось получить данные карты. Попробуйте еще раз или введите номер телефона:",
+                    reply_markup=back_to_menu_kb
                 )
                 await state.set_state(TransactionFSM.number)
                 return
@@ -134,10 +142,13 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                     card_number=card_number,
                     card_id=card_id
                 )
+                await message.answer("Для возврата в главное меню нажмите кнопку 'Назад'.",
+                                     reply_markup=back_to_menu_kb)
                 # Отправляем изображение карты отдельно
                 await message.answer_photo(
                     photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
-                    caption=f"Карта найдена: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                    caption=f"Карта найдена: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})",
+                    reply_markup=back_to_menu_kb
                 )
                 # Отправляем сообщение с выбором типа операции
                 await message.answer(
@@ -147,17 +158,20 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                 await state.set_state(TransactionFSM.transaction_type)
             else:
                 await message.answer(
-                    "Не удалось сгенерировать изображение карты. Попробуйте еще раз или введите номер телефона:"
+                    "Не удалось сгенерировать изображение карты. Попробуйте еще раз или введите номер телефона:",
+                    reply_markup=back_to_menu_kb
                 )
                 await state.set_state(TransactionFSM.number)
         else:
             await message.answer(
-                "Пользователь не найден по номеру карты. Попробуйте еще раз или введите номер телефона:"
+                "Пользователь не найден по номеру карты. Попробуйте еще раз или введите номер телефона:",
+                reply_markup=back_to_menu_kb
             )
             await state.set_state(TransactionFSM.number)
     else:
         await message.answer(
-            "Неверный формат. Введите номер телефона (79998887766 или +79998887766) или номер карты (123 456):"
+            "Неверный формат. Введите номер телефона (79998887766 или +79998887766) или номер карты (123 456):",
+            reply_markup=back_to_menu_kb
         )
 
 
@@ -166,11 +180,15 @@ async def process_phone_or_card(message: Message, state: FSMContext):
 async def process_transaction_type(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора типа транзакции (начисление или списание)."""
     if callback.data == "transaction_accrue":
-        await callback.message.answer("Введите сумму для начисления баллов (в рублях):")
+        await callback.message.answer(
+            "Введите сумму покупки для начисления баллов (в рублях):",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.price)
         await state.update_data(transaction_type="accrue")
     elif callback.data == "transaction_deduct":
-        await callback.message.answer("Введите сумму для списания баллов (в рублях):")
+        await callback.message.answer(
+            "Введите сумму покупки для списания баллов (в рублях):",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.price)
         await state.update_data(transaction_type="deduct")
     await callback.answer()
@@ -183,10 +201,14 @@ async def process_transaction_price(message: Message, state: FSMContext):
     try:
         price = float(message.text.strip())
         if price <= 0:
-            await message.answer("Сумма должна быть положительной. Введите сумму ещё раз:")
+            await message.answer(
+                "Сумма должна быть положительной. Введите сумму ещё раз:",
+                reply_markup=back_to_menu_kb)
             return
     except ValueError:
-        await message.answer("Сумма должна быть числом. Введите сумму ещё раз:")
+        await message.answer(
+            "Сумма должна быть числом. Введите сумму ещё раз:",
+            reply_markup=back_to_menu_kb)
         return
 
     state_data = await state.get_data()
@@ -196,7 +218,9 @@ async def process_transaction_price(message: Message, state: FSMContext):
     user_data = state_data.get('user_data')
 
     if not card_id:
-        await message.answer("Ошибка: ID карты не найден. Попробуйте начать заново.")
+        await message.answer(
+            "Ошибка: ID карты не найден. Попробуйте начать заново.",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.number)
         return
 
@@ -204,20 +228,26 @@ async def process_transaction_price(message: Message, state: FSMContext):
     tg_id = user_data.get('tg_id') or message.from_user.id
     if not tg_id:
         logger.error(f"No tg_id found in user_data: {user_data}")
-        await message.answer("Ошибка: Telegram ID пользователя не найден. Попробуйте начать заново.")
+        await message.answer(
+            "Ошибка: Telegram ID пользователя не найден. Попробуйте начать заново.",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.number)
         return
 
     user_id = await get_user_id_by_tg_id(tg_id)
     if not user_id:
         logger.error(f"No user_id found for tg_id={tg_id}")
-        await message.answer("Ошибка: ID пользователя не найден. Попробуйте начать заново.")
+        await message.answer(
+            "Ошибка: ID пользователя не найден. Попробуйте начать заново.",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.number)
         return
 
     resident_id = state_data.get('resident_id')
     if not resident_id:
-        await message.answer("Ошибка: резидент не определён. Войдите заново.")
+        await message.answer(
+            "Ошибка: резидент не определён. Войдите заново.",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.number)
         return
 
@@ -249,22 +279,24 @@ async def process_transaction_price(message: Message, state: FSMContext):
                                     f"Начислено баллов: <b>{points}</b>\n\n"
                                     f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                     f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
-                                )
+                                ),
+                                reply_markup=back_to_menu_kb
                             )
                         else:
                             # Если изображение не удалось получить, отправляем только текст
                             await message.answer(
                                 f"Начислено баллов: <b>{points}</b>\n\n"
                                 f"за покупку на сумму <b>{price}</b> руб.\n\n"
-                                f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
-                            )
+                                f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})",
+                                reply_markup=back_to_menu_kb)
                         await state.set_state(None)
                     else:
                         error_data = await resp.json()
                         error_msg = error_data.get('error', 'Неизвестная ошибка при начислении баллов')
                         await message.answer(f"Ошибка:\n"
                                              f"<b>{error_msg}</b>.\n"
-                                             f"Попробуйте ещё раз.")
+                                             f"Попробуйте ещё раз.",
+                                             reply_markup=back_to_menu_kb)
                         await state.set_state(TransactionFSM.price)
             elif transaction_type == "deduct":
                 url = url_point_transactions_deduct
@@ -282,14 +314,16 @@ async def process_transaction_price(message: Message, state: FSMContext):
                                     f"Списано баллов: <b>{points}</b>\n\n"
                                     f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                     f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
-                                )
+                                ),
+                                reply_markup=back_to_menu_kb
                             )
                         else:
                             # Если изображение не удалось получить, отправляем только текст
                             await message.answer(
                                 f"Списано баллов: <b>{points}</b>\n\n"
                                 f"за покупку на сумму <b>{price}</b> руб.\n\n"
-                                f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
+                                f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})",
+                                reply_markup=back_to_menu_kb
                             )
                         await state.set_state(None)
                     else:
@@ -297,9 +331,12 @@ async def process_transaction_price(message: Message, state: FSMContext):
                         error_msg = error_data.get('error', 'Неизвестная ошибка при списании баллов')
                         await message.answer(f"Ошибка:\n"
                                              f"<b>{error_msg}</b>.\n"
-                                             f"Попробуйте ещё раз.")
+                                             f"Попробуйте ещё раз.",
+                                             reply_markup=back_to_menu_kb)
                         await state.set_state(TransactionFSM.price)
     except aiohttp.ClientError as e:
         logger.error(f"Error processing transaction {transaction_type} for card_id={card_id}: {e}")
-        await message.answer("Ошибка связи с сервером. Попробуйте ещё раз позже:")
+        await message.answer(
+            "Ошибка связи с сервером. Попробуйте ещё раз позже:",
+            reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.price)

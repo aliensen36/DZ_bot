@@ -11,6 +11,7 @@ main_kb = ReplyKeyboardMarkup(
     persistent=True,
     input_field_placeholder="Выберите действие"
 )
+
 # Клавиатура: Редактирование данных
 edit_data_keyboard = ReplyKeyboardMarkup(
     keyboard=[
