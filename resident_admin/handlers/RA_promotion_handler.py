@@ -618,7 +618,7 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
                 return
             await state.update_data(end_datetime=end_datetime)
             await state.set_state(PromotionForm.waiting_for_discount_or_bonus)
-            await callback.message.edit_text(
+            await callback.message.answer(
                 f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500':",
                 reply_markup=res_admin_edit_promotion_keyboard()
             )
