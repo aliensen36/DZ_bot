@@ -5,7 +5,7 @@ from aiogram import Router, F
 from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from admin.keyboards.admin_inline import mailing_keyboard, admin_link_keyboard, accept_mailing_kb
-from admin.keyboards.admin_reply import admin_keyboard
+from admin.keyboards.admin_reply import admin_keyboard, cancel_keyboard
 from data.url import *
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 from email.mime import image
@@ -14,14 +14,11 @@ from aiogram.fsm.state import State, StatesGroup
 logger = logging.getLogger(__name__)
 
 
-
 admin_mailing_router = Router()
 admin_mailing_router.message.filter(
     ChatTypeFilter("private"),
     IsGroupAdmin([ADMIN_CHAT_ID], show_message=False)
 )
-
-
 
 
 class MailingFSM(StatesGroup):
@@ -39,6 +36,13 @@ class MailingFSM(StatesGroup):
     wait = State()
 
 
+@admin_mailing_router.message(F.text.casefold() == "отмена")
+async def cancel_action(message: Message, state: FSMContext):
+    """Обрабатывает команду 'Отмена' на любом этапе FSM"""
+    await state.clear()
+    await message.answer("Действие отменено. Возврат в главное меню.", reply_markup=admin_keyboard())
+
+
 @admin_mailing_router.message(F.text == "📢 Рассылка")
 async def start_mailing(message: Message, state: FSMContext):
     """Инициирует процесс создания рассылки.
@@ -50,7 +54,7 @@ async def start_mailing(message: Message, state: FSMContext):
     Notes:
         Устанавливает состояние MailingFSM.text и удаляет текущую клавиатуру.
     """
-    await message.answer("Введите текст рассылки:", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Введите текст рассылки:", reply_markup=cancel_keyboard())
     await state.set_state(MailingFSM.text)
     
 
@@ -76,7 +80,7 @@ async def get_text_mailing(message: Message, state: FSMContext):
         return
     else:
         await message.answer("Текст слишком короткий, введите текст рассылки:",
-                             reply_markup=ReplyKeyboardRemove())
+                             reply_markup=cancel_keyboard())
         return
     
 
@@ -92,7 +96,7 @@ async def change_text_mailing(callback: CallbackQuery, state: FSMContext):
         Устанавливает состояние MailingFSM.text и удаляет текущую клавиатуру.
     """
     await callback.message.answer("Введите новый текст рассылки:",
-                                  reply_markup=ReplyKeyboardRemove())
+                                  reply_markup=cancel_keyboard())
     await state.set_state(MailingFSM.text)
     await callback.answer()
     return
@@ -109,7 +113,7 @@ async def add_image_mailing(callback: CallbackQuery, state: FSMContext):
     Notes:
         Устанавливает состояние MailingFSM.image.
     """
-    await callback.message.answer("Отправьте картинку для рассылки:")
+    await callback.message.answer("Отправьте картинку для рассылки:", reply_markup=cancel_keyboard())
     await state.set_state(MailingFSM.image)
     await callback.answer()
     return
@@ -147,7 +151,7 @@ async def add_button_url_mailing(callback: CallbackQuery, state: FSMContext):
     Notes:
         Устанавливает состояние MailingFSM.button_url.
     """
-    await callback.message.answer("Отправьте ссылку для кнопки:")
+    await callback.message.answer("Отправьте ссылку для кнопки:", reply_markup=cancel_keyboard())
     await state.set_state(MailingFSM.button_url)
     await callback.answer()
     
@@ -170,7 +174,7 @@ async def get_button_url_mailing(message: Message, state: FSMContext):
                              reply_markup=await mailing_keyboard(1000))
         await state.set_state(MailingFSM.wait)
     else:
-        await message.answer("Это не ссылка, попробуйте еще раз:")
+        await message.answer("Это не ссылка, попробуйте еще раз:", reply_markup=cancel_keyboard())
     return
 
 
@@ -413,4 +417,3 @@ async def cancel_send_mailing(callback: CallbackQuery, state: FSMContext):
                                   reply_markup=admin_keyboard())
     await callback.answer()
     await state.clear()
-    
