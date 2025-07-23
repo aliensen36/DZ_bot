@@ -256,3 +256,9 @@ async def send_webapp_button(message: Message):
         "Для перехода в приложение нажмите кнопку ниже.",
         reply_markup=webapp_kb
     )
+
+
+@start_router.message(F.text == "/start")
+async def cmd_start(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("Бот перезапущен. Состояние сброшено.")
