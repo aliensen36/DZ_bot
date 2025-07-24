@@ -14,9 +14,9 @@ def res_admin_keyboard():
     return builder.as_markup(resize_keyboard=True)
 
 
-# Кнопка "Назад"
+# Кнопка "↩ Обратно"
 back_to_menu_kb = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text="Назад")]],
+    keyboard=[[KeyboardButton(text="↩ Обратно")]],
     resize_keyboard=True
 )
 

@@ -26,7 +26,7 @@ class TransactionFSM(StatesGroup):
     price = State()
 
 
-@RA_bonus_router.message(F.text == 'Назад')
+@RA_bonus_router.message(F.text == '↩ Обратно')
 @resident_required
 async def back_to_resident_menu(message: Message, state: FSMContext):
     await state.set_state(None)
@@ -87,7 +87,7 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                         card_number=card_number,
                         card_id=card_id
                     )
-                    await message.answer("Для возврата в главное меню нажмите кнопку 'Назад'.",
+                    await message.answer("Для возврата в главное меню нажмите кнопку '↩ Обратно'.",
                                          reply_markup=back_to_menu_kb)
                     # Отправляем изображение карты отдельно
                     await message.answer_photo(
@@ -142,7 +142,7 @@ async def process_phone_or_card(message: Message, state: FSMContext):
                     card_number=card_number,
                     card_id=card_id
                 )
-                await message.answer("Для возврата в главное меню нажмите кнопку 'Назад'.",
+                await message.answer("Для возврата в главное меню нажмите кнопку '↩ Обратно'.",
                                      reply_markup=back_to_menu_kb)
                 # Отправляем изображение карты отдельно
                 await message.answer_photo(
