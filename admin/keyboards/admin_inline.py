@@ -5,6 +5,10 @@ from data.config import config_settings
 from data.url import url_resident, url_category
 
 
+# =================================================================================================
+# Для рассылок
+# =================================================================================================
+
 async def mailing_keyboard(message_size: int) -> InlineKeyboardBuilder:
     """Создаёт инлайн-клавиатуру для управления рассылкой.
 
@@ -38,6 +42,7 @@ async def mailing_keyboard(message_size: int) -> InlineKeyboardBuilder:
     keyboard.adjust(2)
     return keyboard.as_markup()
 
+
 async def admin_link_keyboard(link: str) -> InlineKeyboardBuilder:
     """Создаёт инлайн-клавиатуру с кнопкой для перехода по ссылке.
 
@@ -50,7 +55,8 @@ async def admin_link_keyboard(link: str) -> InlineKeyboardBuilder:
     keyboard = InlineKeyboardBuilder()
     keyboard.add( InlineKeyboardButton(text="Перейти", url=link))
     return keyboard.as_markup()
-    
+
+
 accept_mailing_kb = InlineKeyboardMarkup(
     inline_keyboard=[
         [InlineKeyboardButton(text="Подтвердить рассылку",
@@ -61,56 +67,64 @@ accept_mailing_kb = InlineKeyboardMarkup(
 )
 
 
-async def fetch_resident_categories():
-    """
-    Получает список категорий резидентов из DRF API
-
-    Returns:
-        List[Tuple[str, str]]: Список категорий в формате [(value, name), ...]
-        None: В случае ошибки
-    """
-    url = f"{url_category}"
-    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data
-                else:
-                    response.raise_for_status()
-    except aiohttp.ClientError as e:
-        print(f"HTTP Client Error fetching categories: {e}")
-    except Exception as e:
-        print(f"Unexpected error fetching categories: {e}")
-    return None
+# =================================================================================================
+# Для категорий резидентов
+# =================================================================================================
 
 
-# Клавиатура для выбора категории резидента
-async def get_categories_keyboard():
-    categories = await fetch_resident_categories()
-    print(f"Categories received: {categories}")  # Отладка
-    if categories is None or not isinstance(categories, list) or not categories:
-        print("No categories or invalid format")  # Отладка
-        return None  # Возвращаем None, если нет категорий
+def get_categories_keyboard():
+    """Клавиатура для управления категориями"""
     builder = InlineKeyboardBuilder()
-    for category in categories:
-        try:
-            if isinstance(category, dict):
-                builder.button(
-                    text=category.get('name', 'Unknown'),
-                    callback_data=f"category_{category.get('id', 'unknown')}"
-                )
-            else:
-                builder.button(text=category[1], callback_data=f"category_{category[0]}")
-        except (KeyError, IndexError) as e:
-            print(f"Error processing category {category}: {e}")
-            continue
+    builder.button(text="Добавить категорию", callback_data="add_category")
+    builder.button(text="Удалить категорию", callback_data="delete_category_menu")
+    builder.button(text="Назад", callback_data="back_to_residents_management")
     builder.adjust(1)
-    markup = builder.as_markup()
-    print(f"Keyboard markup: {markup}")  # Отладка
-    return markup
+    return builder.as_markup()
+
+
+def get_delete_categories_keyboard(categories):
+    """Клавиатура для выбора категории на удаление"""
+    builder = InlineKeyboardBuilder()
+
+    for category in categories:
+        builder.button(
+            text=f"❌ {category['name']}",
+            callback_data=f"confirm_delete_category_{category['id']}"
+        )
+
+    builder.button(text="Отмена", callback_data="cancel_delete_category")
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def get_confirmation_keyboard(category_id):
+    """Клавиатура подтверждения удаления"""
+    builder = InlineKeyboardBuilder()
+    builder.button(text="Да, удалить", callback_data=f"delete_category_{category_id}")
+    builder.button(text="Отмена", callback_data="cancel_delete_category")
+    builder.adjust(2)
+    return builder.as_markup()
+
+
+# =================================================================================================
+# Для резидентов
+# =================================================================================================
+
+
+def residents_management_inline_keyboard() -> InlineKeyboardMarkup:
+    """Создает инлайн-клавиатуру для управления резидентами"""
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🗂 Категории резидентов", callback_data="resident_categories")],
+            [InlineKeyboardButton(text="📋 Резиденты", callback_data="residents_list")],
+            [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+        ]
+    )
+    return keyboard
+
+
+
+
 
 
 # Функция для создания инлайн-клавиатуры отмены
@@ -118,3 +132,32 @@ def inline_cancel_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
     ])
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

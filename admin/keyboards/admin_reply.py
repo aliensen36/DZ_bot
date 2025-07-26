@@ -1,3 +1,4 @@
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import ReplyKeyboardBuilder
 
 
@@ -30,6 +31,16 @@ def residents_management_keyboard():
     builder.button(text="◀️ Назад")
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
+
+
+# Клавиатура с кнопкой "Назад"
+def get_back_keyboard():
+    """Возвращает клавиатуру только с кнопкой Назад"""
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="◀️ Назад")]],
+        resize_keyboard=True
+    )
+    return keyboard
 
 
 # Клавиатура управления мероприятиями
