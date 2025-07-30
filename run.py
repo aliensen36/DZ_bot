@@ -15,6 +15,7 @@ from admin.handlers.admin_handler import admin_router
 from admin.handlers.mailing_handler import admin_mailing_router
 from admin.handlers.event_handler import admin_event_router
 from admin.handlers.approve_reject_promo import admin_promotion_router
+from admin.handlers.points_system_settings import admin_points_settings_router
 from cmds.bot_cmds_list import bot_cmds_list
 from client.handlers.profile_handler import profile_router
 from client.handlers.start_handler import start_router
@@ -66,6 +67,7 @@ def setup_routers(dp: Dispatcher) -> None:
         admin_resident_router,
         admin_event_router,
         admin_promotion_router,
+        admin_points_settings_router,
     )
     for router in routers:
         dp.include_router(router)

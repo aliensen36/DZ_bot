@@ -13,4 +13,5 @@ url_point_transactions_deduct = f"{base_url}/resident/points-transactions/deduct
 url_event = f"{base_url}/events/"
 url_promotions = f"{base_url}/promotions/"
 url_verify_pin = f"{base_url}/verify-pin/"
+url_points_settings = f"{base_url}/points-settings/"
 

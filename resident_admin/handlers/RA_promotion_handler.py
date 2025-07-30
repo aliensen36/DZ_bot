@@ -15,7 +15,7 @@ from resident_admin.keyboards.res_admin_reply import res_admin_promotion_keyboar
 from utils.filters import ChatTypeFilter
 from utils.photo import download_photo_from_telegram, validate_photo
 from utils.calendar import get_calendar, get_time_keyboard, format_datetime
-from utils.constants import URL_PATTERN, MOSCOW_TZ, TIME_PATTERN
+from utils.constants import MOSCOW_TZ, TIME_PATTERN
 from resident_admin.services.resident_required import resident_required
 
 # Настройка логирования
@@ -24,10 +24,6 @@ logger = logging.getLogger(__name__)
 # Роутеры
 RA_promotion_router = Router()
 RA_promotion_router.message.filter(ChatTypeFilter("private"))
-
-# Константы
-DISCOUNT_PATTERN = re.compile(r'^\s*скидка\s*(\d+\.?\d*)\s*%?\s*$', re.IGNORECASE)
-BONUS_PATTERN = re.compile(r'^\s*бонус(?:ов)?\s*(\d+\.?\d*)\s*$', re.IGNORECASE)
 
 # =================================================================================================
 # Состояния FSM
@@ -41,8 +37,8 @@ class PromotionForm(StatesGroup):
     waiting_for_start_time = State()
     waiting_for_end_date = State()
     waiting_for_end_time = State()
-    waiting_for_discount_or_bonus = State()
-    waiting_for_url = State()
+    waiting_for_discount_percent = State()
+    waiting_for_promo_code = State()
 
 class PromotionEditForm(StatesGroup):
     choosing_field = State()
@@ -53,8 +49,8 @@ class PromotionEditForm(StatesGroup):
     waiting_for_start_time = State()
     waiting_for_end_date = State()
     waiting_for_end_time = State()
-    waiting_for_discount_or_bonus = State()
-    waiting_for_url = State()
+    waiting_for_discount_percent = State()
+    waiting_for_promo_code = State()
 
 class DeletePromotionForm(StatesGroup):
     waiting_for_confirmation = State()
@@ -68,8 +64,8 @@ def format_promotion_text(promotion: dict) -> str:
         f"<b>Акция обновлена: {promotion['title']}</b>\n\n"
         f"Описание: {promotion['description']}\n\n"
         f"Период: {format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n\n"
-        f"{promotion['discount_or_bonus'].capitalize()}: {promotion['discount_or_bonus_value']}{'%' if promotion['discount_or_bonus'] == 'скидка' else ''}\n\n"
-        f"Ссылка: {promotion['url']}\n"
+        f"Скидка: {promotion['discount_percent']}{'%'}\n\n"
+        f"Промокод: {promotion['promotional_code']}\n"
         f"Статус: {'Подтверждена' if promotion.get('is_approved', False) else 'Ожидае подтверждения'}"
     )
 
@@ -326,67 +322,55 @@ async def process_promotion_description(message: Message, state: FSMContext):
     await state.set_state(PromotionForm.waiting_for_start_date)
     await message.answer("Выберите дату начала акции:", reply_markup=get_calendar(prefix="promo_"))
 
-@RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_discount_or_bonus))
+@RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_discount_percent))
 @resident_required
-async def process_discount_or_bonus(message: Message, state: FSMContext, bot: Bot):
-    input_text = message.text.strip().lower()
+async def process_discount_percent(message: Message, state: FSMContext, bot: Bot):
+    discount_input = message.text.strip()
     
-    discount_match = DISCOUNT_PATTERN.match(input_text)
-    bonus_match = BONUS_PATTERN.match(input_text)
-
-    if discount_match:
-        discount_value = float(discount_match.group(1))
-        if discount_value <= 0 or discount_value > 100:
-            logger.warning(f"User {message.from_user.id} provided invalid discount value: {discount_value}")
+    try:
+        discount_percent = float(discount_input)
+        if discount_percent < 0 or discount_percent > 100:
+            logger.warning(f"User {message.from_user.id} provided invalid discount percent: {discount_input}")
             await message.answer(
-                "Значение скидки должно быть от 0 до 100%. Введите корректное значение, например 'Скидка 10%':",
-                reply_markup=res_admin_cancel_keyboard()
+                "Процент скидки должен быть в диапазоне от 0 до 100. Пожалуйста, введите корректный процент:",
+                reply_markup=res_admin_cancel_keyboard(),
+                parse_mode=None
             )
             return
-        await state.update_data(discount_or_bonus="скидка", discount_or_bonus_value=discount_value)
-    elif bonus_match:
-        bonus_value = float(bonus_match.group(1))
-        if bonus_value <= 0:
-            logger.warning(f"User {message.from_user.id} provided invalid bonus value: {bonus_value}")
-            await message.answer(
-                "Значение бонуса должно быть больше 0. Введите корректное значение, например 'Бонусов 500':",
-                reply_markup=res_admin_cancel_keyboard()
-            )
-            return
-        await state.update_data(discount_or_bonus="бонус", discount_or_bonus_value=bonus_value)
-    else:
-        logger.warning(f"User {message.from_user.id} provided invalid discount/bonus format: {input_text}")
+    except ValueError:
+        logger.warning(f"User {message.from_user.id} provided non-numeric discount percent: {discount_input}")
         await message.answer(
-            "Неверный формат. Введите 'Скидка 10%' или 'Бонусов 500':",
-            reply_markup=res_admin_cancel_keyboard()
+            "Пожалуйста, введите число для процента скидки (например, 10 или 10.5):",
+            reply_markup=res_admin_cancel_keyboard(),
+            parse_mode=None
         )
         return
-    
-    await state.set_state(PromotionForm.waiting_for_url)
+
+    await state.set_state(PromotionForm.waiting_for_promo_code)
     await message.answer(
-        "Введите ссылку на участие в акции:",
+        "Введите промокод акции:",
         reply_markup=res_admin_cancel_keyboard()
     )
 
-@RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_url))
+@RA_promotion_router.message(StateFilter(PromotionForm.waiting_for_promo_code))
 @resident_required
-async def process_promotion_url_and_create(message: Message, state: FSMContext, bot: Bot):
-    url = message.text.strip()
-    if not url:
-        logger.warning(f"User {message.from_user.id} provided empty URL")
+async def process_promotional_code_and_create(message: Message, state: FSMContext, bot: Bot):
+    promotional_code = message.text.strip()
+    if not promotional_code:
+        logger.warning(f"User {message.from_user.id} provided empty promotion code")
         await message.answer(
-            "Ссылка для участия в акции не может быть пустой. Пожалуйста, введите ссылку:",
+            "Промокод акции не может быть пустой. Пожалуйста, введите промокод:",
             reply_markup=res_admin_cancel_keyboard()
         )
         return
-    if not URL_PATTERN.match(url):
-        logger.warning(f"User {message.from_user.id} provided invalid URL format: {url}")
+    if not re.match(r'^[A-Z0-9]+$', promotional_code) or not re.search(r'\d', promotional_code):
+        logger.warning(f"User {message.from_user.id} provided invalid promo code format: {promotional_code}")
         await message.answer(
-            "Неверный формат ссылки. Пожалуйста, введите корректную ссылку для участия:",
-            reply_markup=res_admin_cancel_keyboard()
+            "Промокод должен содержать только заглавные буквы и цифры, а также включать хотя бы одну цифру. Пожалуйста, введите корректный промокод:",
+            reply_markup=res_admin_cancel_keyboard(),
+            parse_mode=None
         )
-        return
-    await state.update_data(url=url)
+    await state.update_data(promotional_code=promotional_code)
 
     data = await state.get_data()
     resident_id = data.get("resident_id")
@@ -404,9 +388,8 @@ async def process_promotion_url_and_create(message: Message, state: FSMContext, 
         "description": data.get("description"),
         "start_date": data.get("start_datetime").isoformat(),
         "end_date": data.get("end_datetime").isoformat(),
-        "url": data.get("url"),
-        "discount_or_bonus": data.get("discount_or_bonus"),
-        "discount_or_bonus_value": data.get("discount_or_bonus_value"),
+        "promotional_code": data.get("promotional_code"),
+        "discount_percent": data.get("discount_percent"),
     }
     photo_file_id = data.get("photo")
 
@@ -419,8 +402,8 @@ async def process_promotion_url_and_create(message: Message, state: FSMContext, 
             f"Описание: {promotion_data['description']}\n"
             f"Дата начала: {format_datetime(promotion_data.get('start_date'))}\n"
             f"Дата окончания: {format_datetime(promotion_data.get('end_date'))}\n"
-            f"Ссылка для участия: {promotion_data['url']}\n"
-            f"{promotion_data['discount_or_bonus'].capitalize()}: {promotion_data['discount_or_bonus_value']}{'%' if promotion_data['discount_or_bonus'] == 'скидка' else ''}\n"
+            f"Промокод: {promotion_data['promotional_code']}\n"
+            f"Скидка:{promotion_data['discount_percent']}{'%'}\n"
             f"Ожидайте подтверждения от администратора."
         )
 
@@ -617,9 +600,9 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
                     await callback.answer("Время окончания должно быть позже времени начала.")
                 return
             await state.update_data(end_datetime=end_datetime)
-            await state.set_state(PromotionForm.waiting_for_discount_or_bonus)
+            await state.set_state(PromotionForm.waiting_for_discount_percent)
             await callback.message.answer(
-                f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500':",
+                f"Время окончания ({time_str}) сохранено. Введите скидку акции:",
                 reply_markup=res_admin_edit_promotion_keyboard()
             )
         elif current_state == PromotionEditForm.waiting_for_start_time.state:
@@ -661,9 +644,9 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
                 return
             updated_fields["end_datetime"] = end_datetime
             await state.update_data(end_datetime=end_datetime, updated_fields=updated_fields)
-            await state.set_state(PromotionEditForm.waiting_for_discount_or_bonus)
+            await state.set_state(PromotionEditForm.waiting_for_discount_percent)
             await callback.message.answer(
-                f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500' (или нажмите 'Пропустить'):",
+                f"Время окончания ({time_str}) сохранено. Введите скидку акции (или нажмите 'Пропустить'):",
                 reply_markup=res_admin_edit_promotion_keyboard()
             )
     except ValueError as e:
@@ -768,10 +751,10 @@ async def process_manual_end_time(message: Message, state: FSMContext):
         updated_fields["end_datetime"] = end_datetime
         await state.update_data(end_datetime=end_datetime, updated_fields=updated_fields)
         current_state = await state.get_state()
-        next_state = PromotionForm.waiting_for_discount_or_bonus if current_state.startswith("PromotionForm") else PromotionEditForm.waiting_for_discount_or_bonus
+        next_state = PromotionForm.waiting_for_discount_percent if current_state.startswith("PromotionForm") else PromotionEditForm.waiting_for_discount_percent
         await state.set_state(next_state)
         await message.answer(
-            f"Время окончания ({time_str}) сохранено. Введите скидку или бонус в формате 'Скидка 10%' или 'Бонусов 500'" + 
+            f"Время окончания ({time_str}) сохранено. Введите скидку акции" + 
             (" (или нажмите 'Пропустить')" if current_state.startswith("PromotionEditForm") else ":"),
             reply_markup=res_admin_edit_promotion_keyboard() if current_state.startswith("PromotionEditForm") else None
         )
@@ -831,8 +814,8 @@ async def edit_promotion_select(message: Message, state: FSMContext):
         f"Описание: {promotion['description']}\n"
         f"Дата начала: {format_datetime(promotion.get('start_date'))}\n"
         f"Дата окончания: {format_datetime(promotion.get('end_date'))}\n"
-        f"Ссылка для участия: {promotion['url']}\n"
-        f"{promotion['discount_or_bonus'].capitalize()}: {promotion['discount_or_bonus_value']}{'%' if promotion['discount_or_bonus'] == 'скидка' else ''}\n"
+        f"Промокод: {promotion['promotional_code']}\n"
+        f"Скидка:{promotion['discount_percent']}{'%'}\n"
     )
 
     photo_url = promotion.get("photo")
@@ -868,8 +851,8 @@ async def skip_edit_field(message: Message, state: FSMContext, bot: Bot):
         PromotionEditForm.waiting_for_start_date.state: ("Введите новое время начала", PromotionEditForm.waiting_for_start_time),
         PromotionEditForm.waiting_for_start_time.state: ("Выберите дату окончания", PromotionEditForm.waiting_for_end_date),
         PromotionEditForm.waiting_for_end_date.state: ("Введите время окончания", PromotionEditForm.waiting_for_end_time),
-        PromotionEditForm.waiting_for_end_time.state: ("Введите скидку или бонус", PromotionEditForm.waiting_for_discount_or_bonus),
-        PromotionEditForm.waiting_for_discount_or_bonus.state: ("Введите ссылку", PromotionEditForm.waiting_for_url),
+        PromotionEditForm.waiting_for_end_time.state: ("Введите скидку", PromotionEditForm.waiting_for_discount_percent),
+        PromotionEditForm.waiting_for_discount_percent.state: ("Введите промокод", PromotionEditForm.waiting_for_promo_code),
     }
 
     if current_state in next_prompt_map:
@@ -883,8 +866,8 @@ async def skip_edit_field(message: Message, state: FSMContext, bot: Bot):
             await message.answer(f"{next_prompt} (или нажмите 'Пропустить')", reply_markup=res_admin_edit_promotion_keyboard())
         return
 
-    elif current_state == PromotionEditForm.waiting_for_url.state:
-        return await skip_promotion_url(message, state, bot=bot)
+    elif current_state == PromotionEditForm.waiting_for_promo_code.state:
+        return await skip_promotional_code(message, state, bot=bot)
 
     await message.answer("Невозможно пропустить этот шаг.")
 
@@ -948,45 +931,50 @@ async def process_promotion_description(message: Message, state: FSMContext):
     await state.set_state(PromotionEditForm.waiting_for_start_date)
     await message.answer("Выберите новую дату начала (или нажмите 'Пропустить'):", reply_markup=get_calendar(prefix="promo_"))
 
-@RA_promotion_router.message(PromotionEditForm.waiting_for_discount_or_bonus)
+@RA_promotion_router.message(PromotionEditForm.waiting_for_discount_percent)
 @resident_required
-async def process_promotion_discount_or_bonus(message: Message, state: FSMContext):
-    input_text = message.text.strip().lower()
-    discount_match = DISCOUNT_PATTERN.match(input_text)
-    bonus_match = BONUS_PATTERN.match(input_text)
-
-    data = await state.get_data()
-    if discount_match:
-        value = float(discount_match.group(1))
-        if not (0 < value <= 100):
-            await message.answer("Скидка должна быть от 1 до 100%. Пример: Скидка 10%", reply_markup=res_admin_edit_promotion_keyboard())
+async def process_promotion_discount_percent(message: Message, state: FSMContext):
+    discount_input = message.text.strip()
+    
+    try:
+        discount_percent = float(discount_input)
+        if discount_percent < 0 or discount_percent > 100:
+            logger.warning(f"User {message.from_user.id} provided invalid discount percent: {discount_input}")
+            await message.answer(
+                "Процент скидки должен быть в диапазоне от 0 до 100. Пожалуйста, введите корректный процент:",
+                reply_markup=res_admin_cancel_keyboard(),
+                parse_mode=None
+            )
             return
-        await state.update_data(updated_fields={**data.get("updated_fields", {}), "discount_or_bonus": "скидка", "discount_or_bonus_value": value})
-
-    elif bonus_match:
-        value = float(bonus_match.group(1))
-        if value <= 0:
-            await message.answer("Бонус должен быть больше 0. Пример: Бонусов 500", reply_markup=res_admin_edit_promotion_keyboard())
-            return
-        await state.update_data(updated_fields={**data.get("updated_fields", {}), "discount_or_bonus": "бонус", "discount_or_bonus_value": value})
-
-    else:
-        await message.answer("Неверный формат. Пример: Скидка 10% или Бонусов 500", reply_markup=res_admin_edit_promotion_keyboard())
+    except ValueError:
+        logger.warning(f"User {message.from_user.id} provided non-numeric discount percent: {discount_input}")
+        await message.answer(
+            "Пожалуйста, введите число для процента скидки (например, 10 или 10.5):",
+            reply_markup=res_admin_cancel_keyboard(),
+            parse_mode=None
+        )
         return
 
-    await state.set_state(PromotionEditForm.waiting_for_url)
-    await message.answer("Введите новую ссылку (или нажмите 'Пропустить'):", reply_markup=res_admin_edit_promotion_keyboard())
+    await state.set_state(PromotionEditForm.waiting_for_promo_code)
+    await message.answer("Введите новый промокод (или нажмите 'Пропустить'):", reply_markup=res_admin_edit_promotion_keyboard())
 
-@RA_promotion_router.message(PromotionEditForm.waiting_for_url)
+@RA_promotion_router.message(PromotionEditForm.waiting_for_promo_code)
 @resident_required
-async def process_promotion_url(message: Message, state: FSMContext, bot: Bot):
-    new_url = message.text.strip()
-    if not new_url:
-        await message.answer("Ссылка не может быть пустой.", reply_markup=res_admin_edit_promotion_keyboard())
+async def process_promotional_code(message: Message, state: FSMContext, bot: Bot):
+    new_code = message.text.strip()
+    if not new_code:
+        await message.answer(
+            "Промокод акции не может быть пустой. Пожалуйста, введите промокод:",
+            reply_markup=res_admin_cancel_keyboard()
+        )
         return
-    if not URL_PATTERN.match(new_url):
-        await message.answer("Неверный формат ссылки. Введите корректную ссылку.", reply_markup=res_admin_edit_promotion_keyboard())
-        return
+    if not re.match(r'^[A-Z0-9]+$', new_code) or not re.search(r'\d', new_code):
+        logger.warning(f"User {message.from_user.id} provided invalid promo code format: {new_code}")
+        await message.answer(
+            "Промокод должен содержать только заглавные буквы и цифры, а также включать хотя бы одну цифру. Пожалуйста, введите корректный промокод:",
+            reply_markup=res_admin_cancel_keyboard(),
+            parse_mode=None
+        )
 
     data = await state.get_data()
     promotion = data.get("promotion")
@@ -995,7 +983,7 @@ async def process_promotion_url(message: Message, state: FSMContext, bot: Bot):
         return
 
     updated_fields = data.get("updated_fields", {})
-    updated_fields["url"] = new_url
+    updated_fields["promotional_code"] = new_code
 
     if "start_datetime" in updated_fields:
         updated_fields["start_date"] = updated_fields.pop("start_datetime").isoformat()
@@ -1005,9 +993,9 @@ async def process_promotion_url(message: Message, state: FSMContext, bot: Bot):
     updated_promotion = await update_promotion(promotion["id"], updated_fields, bot=bot)
     await finish_edit_promotion(message, state, updated_promotion, promotion, data)
 
-@RA_promotion_router.message(PromotionEditForm.waiting_for_url, F.text == "Пропустить")
+@RA_promotion_router.message(PromotionEditForm.waiting_for_promo_code, F.text == "Пропустить")
 @resident_required
-async def skip_promotion_url(message: Message, state: FSMContext, bot: Bot):
+async def skip_promotional_code(message: Message, state: FSMContext, bot: Bot):
     data = await state.get_data()
     promotion = data.get("promotion")
     resident_id = data.get("resident_id")
@@ -1114,7 +1102,8 @@ async def delete_promotion_select(message: Message, state: FSMContext):
         f"Описание: {promotion['description']}\n"
         f"Дата начала: {format_datetime(promotion.get('start_date'))}\n"
         f"Дата окончания: {format_datetime(promotion.get('end_date'))}\n"
-        f"Ссылка для участия: {promotion['url']}\n"
+        f"Промокод: {promotion['promotional_code']}\n"
+        f"Скидка: {promotion['discount_percent']}\n"
     )
 
     builder = ReplyKeyboardBuilder()
