@@ -16,6 +16,7 @@ def admin_keyboard():
     builder.button(text="📢 Рассылка")
     builder.button(text="🏢 Резиденты")
     builder.button(text="🎉 Мероприятия")
+    builder.button(text="🔧 Настройки бонусной системы")
     # builder.button(text="🔧 Настройки")
     builder.button(text="Выход")
     builder.adjust(2)
@@ -72,4 +73,21 @@ def edit_event_keyboard():
     builder.button(text="Изменить ссылку")
     builder.button(text="Отмена")
     builder.adjust(2)
+    return builder.as_markup(resize_keyboard=True)
+
+# Клавиатура для управления настройками бонусной системы
+def points_system_settings_keyboard():
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="Изменить настройки")
+    builder.button(text="Назад")
+    builder.adjust(1)
+    return builder.as_markup(resize_keyboard=True)
+
+# Клавиатура для редактирования настроек бонусной системы
+def edit_points_system_settings_keyboard():
+    builder = ReplyKeyboardBuilder()
+    builder.button(text="Изменить баллы за 100 рублей")
+    builder.button(text="Изменить баллы за 1% скидки")
+    builder.button(text="Назад")
+    builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)
