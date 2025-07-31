@@ -63,15 +63,22 @@ def cancel_keyboard():
 # Клавиатура для редактирования мероприятия
 def edit_event_keyboard():
     builder = ReplyKeyboardBuilder()
-    builder.button(text="Изменить название")
-    builder.button(text="Изменить фото")
-    builder.button(text="Изменить описание")
-    builder.button(text="Изменить информацию")
-    builder.button(text="Изменить дату начала")
-    builder.button(text="Изменить дату окончания")
-    builder.button(text="Изменить локацию")
-    builder.button(text="Изменить ссылку")
-    builder.button(text="Отмена")
+    buttons = [
+        "Изменить название",
+        "Изменить фото",
+        "Изменить описание",
+        "Изменить информацию",
+        "Изменить дату начала",
+        "Изменить дату окончания",
+        "Изменить локацию",
+        "Изменить доступность регистрации",
+        "Изменить или отключить ссылку на регистрацию",
+        "Изменить доступность билетов",
+        "Изменить или отключить ссылку на покупку билета",
+        "Отмена"
+    ]
+    for text in buttons:
+        builder.button(text=text)
     builder.adjust(2)
     return builder.as_markup(resize_keyboard=True)
 
