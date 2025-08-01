@@ -2,6 +2,8 @@ import re
 import aiohttp
 import logging
 from datetime import datetime
+from decimal import Decimal
+
 from aiogram import Router, F, Bot
 from aiogram.filters import StateFilter
 from aiogram.types import Message, CallbackQuery
@@ -116,6 +118,7 @@ async def create_new_promotion(promotion_data: dict, photo_file_id: str = None, 
     data = promotion_data.copy()
     form_data = aiohttp.FormData()
     for key, value in data.items():
+        logger.info(f"Adding field to FormData: {key}={value}")
         form_data.add_field(key, str(value))
     form_data.add_field("resident", str(resident_id))
 
@@ -178,12 +181,12 @@ async def get_promotion_by_title(title: str, state: FSMContext) -> dict:
     return None
 
 async def update_promotion(promotion_id: int, updated_fields: dict, bot: Bot = None):
-    logger.info(f"Updating promotion {promotion_id} with fields: {updated_fields.keys()}")
+    logger.info(f"Updating promotion {promotion_id} with fields: {updated_fields}")  # Логируем полное содержимое
     url = f"{url_promotions}{promotion_id}/"
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
     form_data = aiohttp.FormData()
-
     for key, value in updated_fields.items():
+        logger.info(f"{key}={value}")
         if key == "photo" and value and bot:
             try:
                 photo_content = await download_photo_from_telegram(bot, value)
@@ -197,16 +200,19 @@ async def update_promotion(promotion_id: int, updated_fields: dict, bot: Bot = N
                 logger.error(f"Failed to download photo for update: {e}")
                 raise
         else:
+            if value is None:
+                logger.warning(f"Skipping None value for key {key} in promotion {promotion_id}")
+                continue  # Пропускаем None
             form_data.add_field(key, str(value))
-
     try:
         async with aiohttp.ClientSession() as session:
             async with session.patch(url, headers=headers, data=form_data) as response:
+                response_text = await response.text()  # Захватываем тело ответа
                 if response.status == 200:
                     logger.info(f"Promotion {promotion_id} updated successfully, status={response.status}")
                     return await response.json()
                 else:
-                    logger.error(f"Failed to update promotion {promotion_id}, status={response.status}")
+                    logger.error(f"Failed to update promotion {promotion_id}, status={response.status}, response={response_text}")
                     return False
     except Exception as e:
         logger.error(f"Error updating promotion {promotion_id}: {e}")
@@ -326,9 +332,8 @@ async def process_promotion_description(message: Message, state: FSMContext):
 @resident_required
 async def process_discount_percent(message: Message, state: FSMContext, bot: Bot):
     discount_input = message.text.strip()
-    
     try:
-        discount_percent = float(discount_input)
+        discount_percent = Decimal(discount_input)
         if discount_percent < 0 or discount_percent > 100:
             logger.warning(f"User {message.from_user.id} provided invalid discount percent: {discount_input}")
             await message.answer(
@@ -337,15 +342,25 @@ async def process_discount_percent(message: Message, state: FSMContext, bot: Bot
                 parse_mode=None
             )
             return
+        if discount_percent.as_tuple().exponent < -2: 
+            logger.warning(f"User {message.from_user.id} provided too many decimal places: {discount_input}")
+            await message.answer(
+                "Процент скидки должен иметь не более двух знаков после запятой (например, 10 или 10.50):",
+                reply_markup=res_admin_cancel_keyboard(),
+                parse_mode=None
+            )
+            return
+        discount_percent_str = f"{discount_percent:.2f}"
     except ValueError:
         logger.warning(f"User {message.from_user.id} provided non-numeric discount percent: {discount_input}")
         await message.answer(
-            "Пожалуйста, введите число для процента скидки (например, 10 или 10.5):",
+            "Пожалуйста, введите число для процента скидки (например, 10 или 10.50):",
             reply_markup=res_admin_cancel_keyboard(),
             parse_mode=None
         )
         return
-
+    await state.update_data(discount_percent=discount_percent_str)
+    logger.info(f"Discount percent saved for user {message.from_user.id}: {discount_percent_str}")
     await state.set_state(PromotionForm.waiting_for_promo_code)
     await message.answer(
         "Введите промокод акции:",
@@ -935,28 +950,41 @@ async def process_promotion_description(message: Message, state: FSMContext):
 @resident_required
 async def process_promotion_discount_percent(message: Message, state: FSMContext):
     discount_input = message.text.strip()
-    
     try:
-        discount_percent = float(discount_input)
+        discount_percent = Decimal(discount_input)
         if discount_percent < 0 or discount_percent > 100:
             logger.warning(f"User {message.from_user.id} provided invalid discount percent: {discount_input}")
             await message.answer(
                 "Процент скидки должен быть в диапазоне от 0 до 100. Пожалуйста, введите корректный процент:",
-                reply_markup=res_admin_cancel_keyboard(),
+                reply_markup=res_admin_edit_promotion_keyboard(),
                 parse_mode=None
             )
             return
+        if discount_percent.as_tuple().exponent < -2:
+            logger.warning(f"User {message.from_user.id} provided too many decimal places: {discount_input}")
+            await message.answer(
+                "Процент скидки должен иметь не более двух знаков после запятой (например, 10 или 10.50):",
+                reply_markup=res_admin_edit_promotion_keyboard(),
+                parse_mode=None
+            )
+            return
+        discount_percent_str = f"{discount_percent:.2f}"
     except ValueError:
         logger.warning(f"User {message.from_user.id} provided non-numeric discount percent: {discount_input}")
         await message.answer(
-            "Пожалуйста, введите число для процента скидки (например, 10 или 10.5):",
-            reply_markup=res_admin_cancel_keyboard(),
+            "Пожалуйста, введите число для процента скидки (например, 10 или 10.50):",
+            reply_markup=res_admin_edit_promotion_keyboard(),
             parse_mode=None
         )
         return
-
+    data = await state.get_data()
+    updated_fields = data.get("updated_fields", {})
+    updated_fields["discount_percent"] = discount_percent_str
+    await state.update_data(updated_fields=updated_fields)
+    logger.info(f"Discount percent saved for user {message.from_user.id}: {discount_percent_str}")
     await state.set_state(PromotionEditForm.waiting_for_promo_code)
     await message.answer("Введите новый промокод (или нажмите 'Пропустить'):", reply_markup=res_admin_edit_promotion_keyboard())
+
 
 @RA_promotion_router.message(PromotionEditForm.waiting_for_promo_code)
 @resident_required
@@ -971,25 +999,32 @@ async def process_promotional_code(message: Message, state: FSMContext, bot: Bot
     if not re.match(r'^[A-Z0-9]+$', new_code) or not re.search(r'\d', new_code):
         logger.warning(f"User {message.from_user.id} provided invalid promo code format: {new_code}")
         await message.answer(
-            "Промокод должен содержать только заглавные буквы и цифры, а также включать хотя бы одну цифру. Пожалуйста, введите корректный промокод:",
+            "Промокод должен содержать только заглавные буквы и цифры, а также включать хотя бы одну цифру...",
             reply_markup=res_admin_cancel_keyboard(),
             parse_mode=None
         )
-
+        return
     data = await state.get_data()
     promotion = data.get("promotion")
     if not promotion:
         await handle_missing_promotion(message, state)
         return
-
     updated_fields = data.get("updated_fields", {})
     updated_fields["promotional_code"] = new_code
-
     if "start_datetime" in updated_fields:
         updated_fields["start_date"] = updated_fields.pop("start_datetime").isoformat()
     if "end_datetime" in updated_fields:
         updated_fields["end_date"] = updated_fields.pop("end_datetime").isoformat()
-
+    for field in ["title", "description", "start_date", "end_date", "promotional_code"]:
+        if field not in updated_fields:
+            updated_fields[field] = promotion[field]
+    updated_fields = {k: v for k, v in updated_fields.items() if v is not None}
+    if not updated_fields:
+        logger.warning(f"No valid fields to update for promotion {promotion['id']}")
+        await message.answer("Нет изменений для сохранения.", reply_markup=res_admin_promotion_keyboard())
+        await state.clear()
+        await state.update_data(resident_id=data.get("resident_id"), resident_name=data.get("resident_name"))
+        return
     updated_promotion = await update_promotion(promotion["id"], updated_fields, bot=bot)
     await finish_edit_promotion(message, state, updated_promotion, promotion, data)
 
@@ -1007,27 +1042,36 @@ async def skip_promotional_code(message: Message, state: FSMContext, bot: Bot):
             await state.update_data(resident_id=resident_id, resident_name=resident_name)
         await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
         return
-
     updated_fields = data.get("updated_fields", {})
-    # Convert datetime objects to ISO format for API
     if "start_datetime" in updated_fields:
         updated_fields["start_date"] = updated_fields.pop("start_datetime").isoformat()
     if "end_datetime" in updated_fields:
         updated_fields["end_date"] = updated_fields.pop("end_datetime").isoformat()
-
+    # Добавляем текущие значения обязательных полей
+    for field in ["title", "description", "start_date", "end_date", "promotional_code"]:
+        if field not in updated_fields:
+            updated_fields[field] = promotion[field]
+    # Удаляем None значения
+    updated_fields = {k: v for k, v in updated_fields.items() if v is not None}
+    if not updated_fields:
+        logger.warning(f"No valid fields to update for promotion {promotion['id']}")
+        await message.answer("Нет изменений для сохранения.", reply_markup=res_admin_promotion_keyboard())
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=resident_name)
+        return
     updated_promotion = await update_promotion(promotion_id=promotion["id"], updated_fields=updated_fields, bot=bot)
     if updated_promotion:
-        logger.info(f"Promotion {promotion['id']} updated successfully with fields: {updated_fields.keys()}")
+        logger.info(f"Promotion {promotion['id']} updated successfully with fields: {updated_fields}")
         await state.update_data(promotion=updated_promotion)
         text = format_promotion_text(updated_promotion)
     else:
-        logger.error(f"Failed to update promotion {promotion['id']}")
+        logger.error(f"Failed to update promotion {promotion['id']}, updated_fields={updated_fields}")
         await message.answer("Ошибка при обновлении акции. Попробуйте снова.", reply_markup=res_admin_promotion_keyboard())
         await state.clear()
         if resident_id:
             await state.update_data(resident_id=resident_id, resident_name=resident_name)
         return
-
     photo_url = updated_promotion.get("photo")
     if photo_url:
         try:
