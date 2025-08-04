@@ -103,9 +103,14 @@ async def finish_edit_promotion(message, state, updated_promotion, promotion, da
                 parse_mode="HTML",
                 reply_markup=res_admin_promotion_keyboard()
             )
-        await state.set_state(PromotionEditForm.waiting_for_title)
     else:
         await handle_missing_promotion(message, state)
+
+    resident_id = data.get("resident_id")
+    resident_name = data.get("resident_name")
+    await state.clear()
+    if resident_id:
+        await state.update_data(resident_id=resident_id, resident_name=resident_name)
 
 # =================================================================================================
 # Функции для работы с БД
@@ -1094,7 +1099,9 @@ async def skip_promotional_code(message: Message, state: FSMContext, bot: Bot):
             parse_mode="HTML",
             reply_markup=res_admin_promotion_keyboard()
         )
-    await state.set_state(PromotionEditForm.waiting_for_title)
+    await state.clear()
+    if resident_id:
+        await state.update_data(resident_id=resident_id, resident_name=resident_name)
 
 # =================================================================================================
 # Обработчики удаления акций
