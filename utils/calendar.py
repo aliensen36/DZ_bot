@@ -61,10 +61,20 @@ def get_calendar(year=None, month=None, prefix=""):
 def get_time_keyboard(prefix=""):
     """Генерирует клавиатуру времени с указанным префиксом для callback'ов."""
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
-    times = ["00:00", "03:00", "06:00", "09:00", "12:00", "15:00", "18:00", "21:00"]
+    times = ["12:00", "13:00", "14:00", "15:00", "16:00", "17:00", "18:00", "19:00", "20:00", "21:00"]
+
+    # Создание кнопок
     time_buttons = [InlineKeyboardButton(text=t, callback_data=f"{prefix}select_time:{t}") for t in times]
-    keyboard.inline_keyboard.append(time_buttons)
-    keyboard.inline_keyboard.append([InlineKeyboardButton(text="Ввести вручную", callback_data=f"{prefix}manual_time")])
+
+    # Разбиение на ряды по 4 кнопки
+    for i in range(0, len(time_buttons), 4):
+        keyboard.inline_keyboard.append(time_buttons[i:i + 4])
+
+    # Кнопка "Ввести вручную" отдельной строкой
+    keyboard.inline_keyboard.append(
+        [InlineKeyboardButton(text="Ввести вручную", callback_data=f"{prefix}manual_time")]
+    )
+
     return keyboard
 
 
