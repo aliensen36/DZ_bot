@@ -1,31 +1,42 @@
 import aiohttp
+from aiogram.types import InlineKeyboardMarkup
+
 from data.config import config_settings
 from data.url import url_category, url_resident
+from typing import Optional
+
+import logging
+logger = logging.getLogger(__name__)
+
 
 
 # =================================================================================================
-# API функции для работы с категориями резидентов
+# Для работы с категориями резидентов
 # =================================================================================================
 
 
-async def fetch_categories() -> list[dict]:
+async def fetch_categories(tree: bool = False) -> list[dict]:
     """Получение списка категорий из API"""
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            url_category,
-            headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+                f"{url_category}?tree={'true' if tree else 'false'}",
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
         ) as response:
             response.raise_for_status()
             return await response.json()
 
 
-async def create_category(name: str) -> dict:
+async def create_category(name: str, parent_id: Optional[int] = None) -> dict:
     """Создание новой категории через API"""
     async with aiohttp.ClientSession() as session:
+        data = {"name": name}
+        if parent_id:
+            data["parent"] = parent_id
+
         async with session.post(
-            url_category,
-            headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()},
-            json={"name": name}
+                url_category,
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()},
+                json=data
         ) as response:
             response.raise_for_status()
             return await response.json()
@@ -34,11 +45,68 @@ async def create_category(name: str) -> dict:
 async def delete_category(category_id: int) -> bool:
     """Удаление категории через API"""
     async with aiohttp.ClientSession() as session:
-        async with session.delete(
-            f"{url_category}{category_id}/",
-            headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-        ) as response:
-            return response.status == 204
+        try:
+            async with session.delete(
+                f"{url_category}{category_id}/",
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 404:
+                    logger.error(f"Категория с ID {category_id} не найдена")
+                    return False
+                response.raise_for_status()
+                return response.status == 204
+        except Exception as e:
+            logger.error(f"Ошибка при удалении категории {category_id}: {str(e)}")
+            return False
+
+
+async def format_categories_list(categories: list) -> str:
+    """Форматирует список категорий в едином стиле"""
+    if not categories:
+        return "📋 Список категорий пуст."
+
+    # Собираем все ID подкатегорий
+    subcategory_ids = set()
+
+    def collect_child_ids(cat):
+        for child in cat.get('children', []):
+            subcategory_ids.add(child['id'])
+            collect_child_ids(child)
+
+    for cat in categories:
+        collect_child_ids(cat)
+
+    def format_category(cat, level=0):
+        # Пропускаем подкатегории при основном выводе
+        if level == 0 and cat['id'] in subcategory_ids:
+            return ""
+
+        if level == 0:
+            prefix = "\n\n" if not cat.get('is_first', False) else ""
+            name = f"<b>{cat['name']}</b>"
+        else:
+            prefix = "    " * level
+            name = f" - {cat['name']}"
+
+        children = "\n".join([format_category(child, level + 1) for child in cat.get('children', [])])
+        return f"{prefix}{name}{f'\n{children}' if children else ''}"
+
+    if categories:
+        categories[0]['is_first'] = True
+
+    categories_list = "".join([format_category(cat) for cat in categories])
+    return f"📋 <b>Список категорий резидентов</b>\n\n{categories_list.strip()}"
+
+
+async def show_categories_message(chat_id: int, bot, reply_markup: Optional[InlineKeyboardMarkup] = None):
+    """Показывает сообщение со списком категорий в едином стиле"""
+    categories = await fetch_categories(tree=True)
+    text = await format_categories_list(categories)
+    await bot.send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=reply_markup
+    )
 
 
 # =================================================================================================
@@ -50,92 +118,6 @@ async def delete_category(category_id: int) -> bool:
 
 
 
-
-
-
-
-
-
-async def fetch_resident_categories():
-    """
-    Получает список категорий резидентов из DRF API
-
-    Returns:
-        List[Tuple[str, str]]: Список категорий в формате [(value, name), ...]
-        None: В случае ошибки
-    """
-    url = f"{url_category}"
-    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    return data
-                else:
-                    response.raise_for_status()
-    except aiohttp.ClientError as e:
-        print(f"HTTP Client Error fetching categories: {e}")
-    except Exception as e:
-        print(f"Unexpected error fetching categories: {e}")
-    return None
-
-
-# Клавиатура для выбора категории резидента
-# async def get_categories_keyboard():
-#     categories = await fetch_resident_categories()
-#     print(f"Categories received: {categories}")  # Отладка
-#     if categories is None or not isinstance(categories, list) or not categories:
-#         print("No categories or invalid format")  # Отладка
-#         return None  # Возвращаем None, если нет категорий
-#     builder = InlineKeyboardBuilder()
-#     for category in categories:
-#         try:
-#             if isinstance(category, dict):
-#                 builder.button(
-#                     text=category.get('name', 'Unknown'),
-#                     callback_data=f"category_{category.get('id', 'unknown')}"
-#                 )
-#             else:
-#                 builder.button(text=category[1], callback_data=f"category_{category[0]}")
-#         except (KeyError, IndexError) as e:
-#             print(f"Error processing category {category}: {e}")
-#             continue
-#     builder.adjust(1)
-#     markup = builder.as_markup()
-#     print(f"Keyboard markup: {markup}")  # Отладка
-#     return markup
-
-
-# Создание новой категории резидента
-async def create_new_category(category_name: str):
-    """
-    Создаёт новую категорию в DRF API.
-
-    Args:
-        category_name: Название категории
-
-    Returns:
-        str or None: ID новой категории (value) или None в случае ошибки
-    """
-    url = f"{url_category}"
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    payload = {"name": category_name}
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                print(f"Create category status: {response.status}")
-                if response.status == 201:
-                    data = await response.json()
-                    return data.get('id', data.get('value'))  # Возвращаем id или value
-                else:
-                    print(f"Error creating category: {await response.text()}")
-    except aiohttp.ClientError as e:
-        print(f"HTTP Client Error creating category: {e}")
-    except Exception as e:
-        print(f"Unexpected error creating category: {e}")
-    return None
 
 # Создание нового резидента
 async def create_new_resident(name: str, category_id: str, description: str):

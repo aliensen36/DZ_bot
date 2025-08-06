@@ -73,35 +73,62 @@ accept_mailing_kb = InlineKeyboardMarkup(
 
 
 def get_categories_keyboard():
-    """Клавиатура для управления категориями"""
+    """Клавиатура управления категориями"""
     builder = InlineKeyboardBuilder()
-    builder.button(text="Добавить категорию", callback_data="add_category")
-    builder.button(text="Удалить категорию", callback_data="delete_category_menu")
-    builder.button(text="Назад", callback_data="back_to_residents_management")
+    builder.button(text="➕ Добавить категорию", callback_data="add_category")
+    builder.button(text="🗑 Удалить категорию", callback_data="delete_category_menu")
+    builder.button(text="↩️ Назад", callback_data="back_to_residents_management")
     builder.adjust(1)
     return builder.as_markup()
 
 
-def get_delete_categories_keyboard(categories):
-    """Клавиатура для выбора категории на удаление"""
+def get_delete_categories_keyboard(categories: list[dict]) -> InlineKeyboardBuilder:
+    """Создает клавиатуру для удаления категорий"""
     builder = InlineKeyboardBuilder()
 
-    for category in categories:
-        builder.button(
-            text=f"❌ {category['name']}",
-            callback_data=f"confirm_delete_category_{category['id']}"
-        )
+    # Собираем все ID подкатегорий
+    subcategory_ids = set()
 
-    builder.button(text="Отмена", callback_data="cancel_delete_category")
-    builder.adjust(1)
-    return builder.as_markup()
+    def collect_child_ids(cat):
+        for child in cat.get('children', []):
+            subcategory_ids.add(child['id'])
+            collect_child_ids(child)
+
+    for cat in categories:
+        collect_child_ids(cat)
+
+    def add_category_buttons(cats, level=0):
+        for cat in cats:
+            # Пропускаем подкатегории в основном списке
+            if level == 0 and cat['id'] in subcategory_ids:
+                continue
+
+            # Добавляем кнопку категории
+            btn_text = "    " * level + ("- подкатегория:  " if level > 0 else "") + cat['name']
+            builder.button(
+                text=btn_text,
+                callback_data=f"confirm_delete_category_{cat['id']}"
+            )
+
+            # Рекурсивно добавляем дочерние категории
+            if cat.get('children'):
+                add_category_buttons(cat['children'], level + 1)
+
+    add_category_buttons(categories)
+    return builder
 
 
-def get_confirmation_keyboard(category_id):
+def get_confirmation_keyboard(category_id: int):
     """Клавиатура подтверждения удаления"""
     builder = InlineKeyboardBuilder()
-    builder.button(text="Да, удалить", callback_data=f"delete_category_{category_id}")
-    builder.button(text="Отмена", callback_data="cancel_delete_category")
+    builder.button(
+        text="✅ Да, удалить",
+        callback_data=f"delete_category_{category_id}"
+    )
+    builder.button(
+        text="❌ Отмена",
+        callback_data="cancel_delete_category"
+    )
     builder.adjust(2)
     return builder.as_markup()
 
