@@ -186,7 +186,7 @@ async def get_promotion_by_title(title: str, state: FSMContext) -> dict:
     return None
 
 async def update_promotion(promotion_id: int, updated_fields: dict, bot: Bot = None):
-    logger.info(f"Updating promotion {promotion_id} with fields: {updated_fields}")  # Логируем полное содержимое
+    logger.info(f"Updating promotion {promotion_id} with fields: {updated_fields}")
     url = f"{url_promotions}{promotion_id}/"
     headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
     form_data = aiohttp.FormData()
@@ -207,12 +207,12 @@ async def update_promotion(promotion_id: int, updated_fields: dict, bot: Bot = N
         else:
             if value is None:
                 logger.warning(f"Skipping None value for key {key} in promotion {promotion_id}")
-                continue  # Пропускаем None
+                continue
             form_data.add_field(key, str(value))
     try:
         async with aiohttp.ClientSession() as session:
             async with session.patch(url, headers=headers, data=form_data) as response:
-                response_text = await response.text()  # Захватываем тело ответа
+                response_text = await response.text()
                 if response.status == 200:
                     logger.info(f"Promotion {promotion_id} updated successfully, status={response.status}")
                     return await response.json()
@@ -1024,12 +1024,6 @@ async def process_promotional_code(message: Message, state: FSMContext, bot: Bot
         if field not in updated_fields:
             updated_fields[field] = promotion[field]
     updated_fields = {k: v for k, v in updated_fields.items() if v is not None}
-    if not updated_fields:
-        logger.warning(f"No valid fields to update for promotion {promotion['id']}")
-        await message.answer("Нет изменений для сохранения.", reply_markup=res_admin_promotion_keyboard())
-        await state.clear()
-        await state.update_data(resident_id=data.get("resident_id"), resident_name=data.get("resident_name"))
-        return
     updated_promotion = await update_promotion(promotion["id"], updated_fields, bot=bot)
     await finish_edit_promotion(message, state, updated_promotion, promotion, data)
 
@@ -1047,7 +1041,16 @@ async def skip_promotional_code(message: Message, state: FSMContext, bot: Bot):
             await state.update_data(resident_id=resident_id, resident_name=resident_name)
         await message.answer("Ошибка доступа к акции.", reply_markup=res_admin_promotion_keyboard())
         return
+    
     updated_fields = data.get("updated_fields", {})
+    if not updated_fields:  # Проверяем, есть ли изменения
+        logger.warning(f"No changes to update for promotion {promotion['id']}")
+        await message.answer("Нет изменений для сохранения.", reply_markup=res_admin_promotion_keyboard())
+        await state.clear()
+        if resident_id:
+            await state.update_data(resident_id=resident_id, resident_name=resident_name)
+        return
+    
     if "start_datetime" in updated_fields:
         updated_fields["start_date"] = updated_fields.pop("start_datetime").isoformat()
     if "end_datetime" in updated_fields:
