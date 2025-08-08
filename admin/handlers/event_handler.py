@@ -16,6 +16,7 @@ from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
 from utils.photo import download_photo_from_telegram, validate_photo
 from utils.calendar import get_calendar, get_time_keyboard, format_datetime
 from utils.constants import URL_PATTERN, MOSCOW_TZ, TIME_PATTERN
+from utils.check_length import check_length
 
 logger = logging.getLogger(__name__)
 
@@ -225,6 +226,9 @@ async def process_event_title(message: Message, state: FSMContext):
     if not title:
         await message.answer("Название не может быть пустым. Введите название:", reply_markup=cancel_keyboard())
         return
+    if check_length(title, max_length=100):
+        await message.answer("Название слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
+        return
     await state.update_data(title=title)
     await state.set_state(EventForm.waiting_for_photo)
     await message.answer("Отправьте фото для мероприятия:", reply_markup=cancel_keyboard())
@@ -246,6 +250,9 @@ async def process_event_description(message: Message, state: FSMContext):
     if not description:
         await message.answer("Описание не может быть пустым. Введите описание:", reply_markup=cancel_keyboard())
         return
+    if check_length(description, max_length=100):
+        await message.answer("Описание слишком длинное. Максимальная длина - 500 символов.", reply_markup=cancel_keyboard())
+        return
     await state.update_data(description=description)
     await state.set_state(EventForm.waiting_for_info)
     await message.answer("Введите дополнительную информацию о мероприятии:", reply_markup=cancel_keyboard())
@@ -256,6 +263,9 @@ async def process_event_info(message: Message, state: FSMContext):
     if not info:
         await message.answer("Информация не может быть пустой. Введите информацию:", reply_markup=cancel_keyboard())
         return
+    if check_length(info, max_length=400):
+        await message.answer("Информация слишком длинная. Максимальная длина - 400 символов.", reply_markup=cancel_keyboard())
+        return
     await state.update_data(info=info)
     await state.set_state(EventForm.waiting_for_start_date)
     await message.answer("Выберите дату начала мероприятия:", reply_markup=get_calendar(prefix="event_"))
@@ -265,6 +275,9 @@ async def process_event_location(message: Message, state: FSMContext):
     location = message.text.strip()
     if not location:
         await message.answer("Место проведения не может быть пустым. Введите место:", reply_markup=cancel_keyboard())
+        return
+    if check_length(location, max_length=100):
+        await message.answer("Место проведения слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
         return
     await state.update_data(location=location)
     await state.set_state(EventForm.waiting_for_enable_registration)
@@ -307,6 +320,9 @@ async def process_enable_registration(message: Message, state: FSMContext):
 async def process_registration_url(message: Message, state: FSMContext):
     url = message.text.strip()
     logger.debug(f"User {message.from_user.id} sent registration_url '{url}'")
+    if check_length(url, max_length=70):
+        await message.answer("Ссылка слишком длинная. Максимальная длина - 70 символов.", reply_markup=cancel_keyboard())
+        return
     if not URL_PATTERN.match(url):
         logger.warning(f"Invalid URL: '{url}' by user {message.from_user.id}")
         await message.answer("Неверный формат ссылки. Введите корректную ссылку:", reply_markup=cancel_keyboard())
@@ -346,6 +362,9 @@ async def process_enable_tickets(message: Message, state: FSMContext):
 async def process_ticket_url_and_create(message: Message, state: FSMContext, bot: Bot):
     url = message.text.strip()
     logger.debug(f"User {message.from_user.id} sent ticket_url '{url}'")
+    if check_length(url, max_length=70):
+        await message.answer("Ссылка слишком длинная. Максимальная длина - 70 символов.", reply_markup=cancel_keyboard())
+        return
     if not URL_PATTERN.match(url):
         logger.warning(f"Invalid URL: '{url}' by user {message.from_user.id}")
         await message.answer("Неверный формат ссылки. Введите корректную ссылку:", reply_markup=cancel_keyboard())
@@ -374,12 +393,11 @@ async def process_create_event(message: Message, state: FSMContext, bot: Bot):
         if created_event:
             caption = (
                 f"Мероприятие успешно создано!\n"
-                f"Название: {event_data['title']}\n"
-                f"Описание: {event_data['description']}\n"
-                f"Информация: {event_data['info']}\n"
-                f"Дата начала: {format_datetime(event_data['start_date'])}\n"
-                f"Дата окончания: {format_datetime(event_data['end_date'])}\n"
-                f"Место: {event_data['location']}\n"
+                f"{event_data['title']}\n"
+                f"{event_data['description']}\n"
+                f"{event_data['info']}\n"
+                f"{format_datetime(event_data['start_date'])} - {format_datetime(event_data['end_date'])}\n"
+                f"{event_data['location']}\n"
                 f"Регистрация: {'Включена' if event_data['enable_registration'] else 'Выключена'}\n"
                 f"Ссылка на регистрацию: {event_data['registration_url'] or 'Отсутствует'}\n"
                 f"Покупка билетов: {'Включена' if event_data['enable_tickets'] else 'Выключена'}\n"
@@ -854,12 +872,11 @@ async def process_manual_edit_start_time(message: Message, state: FSMContext):
                 return
             await state.update_data(event=updated_event)
             text = (
-                f"Название: {updated_event['title']}\n"
-                f"Описание: {updated_event['description']}\n"
-                f"Информация: {updated_event['info']}\n"
-                f"Дата начала: {format_datetime(updated_event.get('start_date'))}\n"
-                f"Дата окончания: {format_datetime(updated_event.get('end_date'))}\n"
-                f"Место: {updated_event['location']}\n"
+                f"{updated_event['title']}\n"
+                f"{updated_event['description']}\n"
+                f"{updated_event['info']}\n"
+                f"{format_datetime(updated_event.get('start_date'))} - {format_datetime(updated_event.get('end_date'))}\n"
+                f"{updated_event['location']}\n"
                 f"Регистрация: {'Включена' if updated_event['enable_registration'] else 'Выключена'}\n"
                 f"Ссылка на регистрацию: {updated_event.get('registration_url') or 'Отсутствует'}\n"
                 f"Покупка билетов: {'Включена' if updated_event['enable_tickets'] else 'Выключена'}\n"
@@ -942,12 +959,11 @@ async def process_manual_edit_end_time(message: Message, state: FSMContext):
         if updated_event:
             await state.update_data(event=updated_event)
             text = (
-                f"Название: {updated_event['title']}\n"
-                f"Описание: {updated_event['description']}\n"
-                f"Информация: {updated_event['info']}\n"
-                f"Дата начала: {format_datetime(updated_event.get('start_date'))}\n"
-                f"Дата окончания: {format_datetime(updated_event.get('end_date'))}\n"
-                f"Место: {updated_event['location']}\n"
+                f"{updated_event['title']}\n"
+                f"{updated_event['description']}\n"
+                f"{updated_event['info']}\n"
+                f"{format_datetime(updated_event.get('start_date'))} - {format_datetime(updated_event.get('end_date'))}\n"
+                f"{updated_event['location']}\n"
                 f"Регистрация: {'Включена' if updated_event['enable_registration'] else 'Выключена'}\n"
                 f"Ссылка на регистрацию: {updated_event.get('registration_url') or 'Отсутствует'}\n"
                 f"Покупка билетов: {'Включена' if updated_event['enable_tickets'] else 'Выключена'}\n"
@@ -1020,12 +1036,11 @@ async def edit_event_select(message: Message, state: FSMContext):
     await state.set_state(EditEventForm.choosing_field)
     await state.update_data(event=event)
     current_event_text = (
-        f"Название: {event['title']}\n"
-        f"Описание: {event['description']}\n"
-        f"Информация: {event['info']}\n"
-        f"Дата начала: {format_datetime(event.get('start_date'))}\n"
-        f"Дата окончания: {format_datetime(event.get('end_date'))}\n"
-        f"Место: {event['location']}\n"
+        f"{event['title']}\n"
+        f"{event['description']}\n"
+        f"{event['info']}\n"
+        f"{format_datetime(event.get('start_date'))} - {format_datetime(event.get('end_date'))}\n"
+        f"{event['location']}\n"
         f"Регистрация: {'Включена' if event['enable_registration'] else 'Выключена'}\n"
         f"Ссылка на регистрацию: {event.get('registration_url') or 'Отсутствует'}\n"
         f"Покупка билетов: {'Включена' if event['enable_tickets'] else 'Выключена'}\n"
@@ -1123,6 +1138,9 @@ async def process_event_title(message: Message, state: FSMContext):
     if not new_title:
         await message.answer("Название не может быть пустым.", reply_markup=cancel_keyboard())
         return
+    if check_length(new_title, 100):
+        await message.answer("Название слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
+        return
     data = await state.get_data()
     event = data.get("event")
     if not event:
@@ -1172,6 +1190,9 @@ async def process_event_description(message: Message, state: FSMContext):
     if not new_description:
         await message.answer("Описание не может быть пустым.", reply_markup=cancel_keyboard())
         return
+    if check_length(new_description, 100):
+        await message.answer("Описание слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
+        return
     data = await state.get_data()
     event = data.get("event")
     if not event:
@@ -1196,6 +1217,9 @@ async def process_event_info(message: Message, state: FSMContext):
     if not new_info:
         await message.answer("Информация не может быть пустой.", reply_markup=cancel_keyboard())
         return
+    if check_length(new_info, 400):
+        await message.answer("Информация слишком длинная. Максимальная длина - 400 символов.", reply_markup=cancel_keyboard())
+        return
     data = await state.get_data()
     event = data.get("event")
     if not event:
@@ -1219,6 +1243,9 @@ async def process_event_location(message: Message, state: FSMContext):
     new_location = message.text.strip()
     if not new_location:
         await message.answer("Локация не может быть пустой.", reply_markup=cancel_keyboard())
+        return
+    if check_length(new_location, 100):
+        await message.answer("Локация слишком длинная. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
         return
     data = await state.get_data()
     event = data.get("event")
@@ -1293,6 +1320,9 @@ async def process_event_registration_url(message: Message, state: FSMContext):
     if new_url.lower() == "отключить":
         updated_fields = {"registration_url": None, "enable_registration": False}
     else:
+        if check_length(new_url, 70):
+            await message.answer("Ссылка слишком длинная. Максимальная длина - 70 символов.", reply_markup=cancel_keyboard())
+            return
         if not URL_PATTERN.match(new_url):
             logger.warning(f"Invalid URL: '{new_url}' by user {message.from_user.id}")
             await message.answer("Неверный формат ссылки. Введите корректную ссылку или 'отключить':", reply_markup=cancel_keyboard())
@@ -1369,6 +1399,9 @@ async def process_event_ticket_url(message: Message, state: FSMContext):
     if new_url.lower() == "отключить":
         updated_fields = {"ticket_url": None, "enable_tickets": False}
     else:
+        if check_length(new_url, 70):
+            await message.answer("Ссылка слишком длинная. Максимальная длина - 70 символов.", reply_markup=cancel_keyboard())
+            return
         if not URL_PATTERN.match(new_url):
             logger.warning(f"Invalid URL: '{new_url}' by user {message.from_user.id}")
             await message.answer("Неверный формат ссылки. Введите корректную ссылку или 'отключить':", reply_markup=cancel_keyboard())
@@ -1416,12 +1449,11 @@ async def delete_event_select(message: Message, state: FSMContext):
     await state.update_data(event=event)
     await state.set_state(DeleteEventForm.waiting_for_confirmation)
     current_event_text = (
-        f"Название: {event['title']}\n"
-        f"Описание: {event['description']}\n"
-        f"Информация: {event['info']}\n"
-        f"Дата начала: {format_datetime(event.get('start_date'))}\n"
-        f"Дата окончания: {format_datetime(event.get('end_date'))}\n"
-        f"Место: {event['location']}\n"
+        f"{event['title']}\n"
+        f"{event['description']}\n"
+        f"{event['info']}\n"
+        f"{format_datetime(event.get('start_date'))} - {format_datetime(event.get('end_date'))}\n"
+        f"{event['location']}\n"
         f"Регистрация: {'Включена' if event['enable_registration'] else 'Выключена'}\n"
         f"Ссылка на регистрация: {event.get('registration_url') or 'Отсутствует'}\n"
         f"Покупка билетов: {'Включена' if event['enable_tickets'] else 'Выключена'}\n"
