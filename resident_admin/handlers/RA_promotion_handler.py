@@ -18,6 +18,7 @@ from utils.filters import ChatTypeFilter
 from utils.photo import download_photo_from_telegram, validate_photo
 from utils.calendar import get_calendar, get_time_keyboard, format_datetime
 from utils.constants import MOSCOW_TZ, TIME_PATTERN
+from utils.check_length import check_length
 from resident_admin.services.resident_required import resident_required
 
 # Настройка логирования
@@ -63,12 +64,13 @@ class DeletePromotionForm(StatesGroup):
 
 def format_promotion_text(promotion: dict) -> str:
     return (
-        f"<b>Акция обновлена: {promotion['title']}</b>\n\n"
-        f"Описание: {promotion['description']}\n\n"
-        f"Период: {format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n\n"
-        f"Скидка: {promotion['discount_percent']}{'%'}\n\n"
-        f"Промокод: {promotion['promotional_code']}\n"
-        f"Статус: {'Подтверждена' if promotion.get('is_approved', False) else 'Ожидае подтверждения'}"
+        f"<b>Акция обновлена!</b>\n\n"
+        f"{promotion['title']}\n"
+        f"{promotion['description']}\n"
+        f"{format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n"
+        f"{promotion['discount_percent']}{'%'}\n"
+        f"{promotion['promotional_code']}"
+        f"Ожидайте подтверждения администратора."
     )
 
 async def handle_missing_promotion(message: Message, state: FSMContext):
@@ -305,6 +307,10 @@ async def process_promotion_title(message: Message, state: FSMContext):
         logger.warning(f"User {message.from_user.id} provided empty title")
         await message.answer("Название не может быть пустым. Пожалуйста, введите название акции:", reply_markup=res_admin_cancel_keyboard())
         return
+    if check_length(title, 100):
+        logger.warning(f"User {message.from_user.id} provided title longer than 100 characters: {title}")
+        await message.answer("Название акции не может превышать 100 символов. Пожалуйста, введите корректное название:", reply_markup=res_admin_cancel_keyboard())
+        return
     await state.update_data(title=title)
     await state.set_state(PromotionForm.waiting_for_photo)
     await message.answer("Отправьте фото для акции:", reply_markup=res_admin_cancel_keyboard())
@@ -328,6 +334,10 @@ async def process_promotion_description(message: Message, state: FSMContext):
     if not description:
         logger.warning(f"User {message.from_user.id} provided empty description")
         await message.answer("Описание не может быть пустым. Пожалуйста, введите описание акции:", reply_markup=res_admin_cancel_keyboard())
+        return
+    if check_length(description, 700):
+        logger.warning(f"User {message.from_user.id} provided description longer than 700 characters: {description}")
+        await message.answer("Описание акции не может превышать 700 символов. Пожалуйста, введите корректное описание:", reply_markup=res_admin_cancel_keyboard())
         return
     await state.update_data(description=description)
     await state.set_state(PromotionForm.waiting_for_start_date)
@@ -383,6 +393,14 @@ async def process_promotional_code_and_create(message: Message, state: FSMContex
             reply_markup=res_admin_cancel_keyboard()
         )
         return
+    if check_length(promotional_code, 20):
+        logger.warning(f"User {message.from_user.id} provided promotional code longer than 20 characters: {promotional_code}")
+        await message.answer(
+            "Промокод не может превышать 20 символов. Пожалуйста, введите корректный промокод:",
+            reply_markup=res_admin_cancel_keyboard(),
+            parse_mode=None
+        )
+        return
     if not re.match(r'^[A-Z0-9]+$', promotional_code) or not re.search(r'\d', promotional_code):
         logger.warning(f"User {message.from_user.id} provided invalid promo code format: {promotional_code}")
         await message.answer(
@@ -418,13 +436,12 @@ async def process_promotional_code_and_create(message: Message, state: FSMContex
         logger.info(f"Promotion created successfully for user_id={message.from_user.id}, title={promotion_data['title']}")
         caption = (
             f"Акция успешно создана!\n"
-            f"Название: {promotion_data['title']}\n"
-            f"Описание: {promotion_data['description']}\n"
-            f"Дата начала: {format_datetime(promotion_data.get('start_date'))}\n"
-            f"Дата окончания: {format_datetime(promotion_data.get('end_date'))}\n"
-            f"Промокод: {promotion_data['promotional_code']}\n"
-            f"Скидка:{promotion_data['discount_percent']}{'%'}\n"
-            f"Ожидайте подтверждения от администратора."
+            f"{promotion_data['title']}\n"
+            f"{promotion_data['description']}\n"
+            f"{format_datetime(promotion_data.get('start_date'))} - {format_datetime(promotion_data.get('end_date'))}\n"
+            f"{promotion_data['discount_percent']}{'%'}\n"
+            f"{promotion_data['promotional_code']}"
+            f"Ожидайте подтверждения администратора."
         )
 
         photo_url = created_promotion.get("photo")
@@ -830,12 +847,11 @@ async def edit_promotion_select(message: Message, state: FSMContext):
     await state.set_state(PromotionEditForm.waiting_for_title)
 
     current_promotion_text = (
-        f"Название: {promotion['title']}\n"
-        f"Описание: {promotion['description']}\n"
-        f"Дата начала: {format_datetime(promotion.get('start_date'))}\n"
-        f"Дата окончания: {format_datetime(promotion.get('end_date'))}\n"
-        f"Промокод: {promotion['promotional_code']}\n"
-        f"Скидка:{promotion['discount_percent']}{'%'}\n"
+        f"{promotion['title']}\n"
+        f"{promotion['description']}\n"
+        f"{format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n"
+        f"{promotion['discount_percent']}{'%'}\n"
+        f"{promotion['promotional_code']}"
     )
 
     photo_url = promotion.get("photo")
@@ -898,6 +914,9 @@ async def process_promotion_title(message: Message, state: FSMContext):
     if not new_title:
         await message.answer("Название не может быть пустым.", reply_markup=res_admin_edit_promotion_keyboard())
         return
+    if check_length(new_title, 100):
+        await message.answer("Название не может превышать 100 символов. Пожалуйста, введите корректное название:", reply_markup=res_admin_edit_promotion_keyboard())
+        return
 
     data = await state.get_data()
     promotion = data.get("promotion")
@@ -937,6 +956,10 @@ async def process_promotion_description(message: Message, state: FSMContext):
     new_description = message.text.strip()
     if not new_description:
         await message.answer("Описание не может быть пустым.", reply_markup=res_admin_edit_promotion_keyboard())
+        return
+
+    if check_length(new_description, 700):
+        await message.answer("Описание не может превышать 700 символов. Пожалуйста, введите корректное описание:", reply_markup=res_admin_edit_promotion_keyboard())
         return
 
     data = await state.get_data()
@@ -998,6 +1021,12 @@ async def process_promotional_code(message: Message, state: FSMContext, bot: Bot
     if not new_code:
         await message.answer(
             "Промокод акции не может быть пустой. Пожалуйста, введите промокод:",
+            reply_markup=res_admin_cancel_keyboard()
+        )
+        return
+    if check_length(new_code, 20):
+        await message.answer(
+            "Промокод не может превышать 20 символов. Пожалуйста, введите корректный промокод:",
             reply_markup=res_admin_cancel_keyboard()
         )
         return
@@ -1152,12 +1181,11 @@ async def delete_promotion_select(message: Message, state: FSMContext):
     await state.set_state(DeletePromotionForm.waiting_for_confirmation)
 
     current_promotion_text = (
-        f"Название: {promotion['title']}\n"
-        f"Описание: {promotion['description']}\n"
-        f"Дата начала: {format_datetime(promotion.get('start_date'))}\n"
-        f"Дата окончания: {format_datetime(promotion.get('end_date'))}\n"
-        f"Промокод: {promotion['promotional_code']}\n"
-        f"Скидка: {promotion['discount_percent']}\n"
+        f"{promotion['title']}\n"
+        f"{promotion['description']}\n"
+        f"{format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n"
+        f"{promotion['discount_percent']}{'%'}\n"
+        f"{promotion['promotional_code']}"
     )
 
     builder = ReplyKeyboardBuilder()
