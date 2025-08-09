@@ -1112,9 +1112,9 @@ async def edit_event_enable_registration(message: Message, state: FSMContext):
     await message.answer("Доступна ли регистрация на мероприятие?", reply_markup=builder.as_markup(resize_keyboard=True))
     await state.set_state(EditEventForm.waiting_for_enable_registration)
 
-@admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить или отключить ссылку на регистрацию")
+@admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить ссылку на регистрацию")
 async def edit_event_registration_url(message: Message, state: FSMContext):
-    await message.answer("Введите новую ссылку на регистрацию (или 'отключить' для удаления):", reply_markup=cancel_keyboard())
+    await message.answer("Введите новую ссылку на регистрацию:", reply_markup=cancel_keyboard())
     await state.set_state(EditEventForm.waiting_for_registration_url)
 
 @admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить доступность билетов")
@@ -1127,9 +1127,9 @@ async def edit_event_enable_tickets(message: Message, state: FSMContext):
     await message.answer("Доступна ли покупка билетов на мероприятие?", reply_markup=builder.as_markup(resize_keyboard=True))
     await state.set_state(EditEventForm.waiting_for_enable_tickets)
 
-@admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить или отключить ссылку на покупку билета")
+@admin_event_router.message(EditEventForm.choosing_field, F.text == "Изменить ссылку на покупку билета")
 async def edit_event_ticket_url(message: Message, state: FSMContext):
-    await message.answer("Введите новую ссылку на покупку билета (или 'отключить' для удаления):", reply_markup=cancel_keyboard())
+    await message.answer("Введите новую ссылку на покупку билета:", reply_markup=cancel_keyboard())
     await state.set_state(EditEventForm.waiting_for_ticket_url)
 
 @admin_event_router.message(EditEventForm.waiting_for_title)
@@ -1289,22 +1289,26 @@ async def process_edit_enable_registration(message: Message, state: FSMContext):
     updated_fields = {"enable_registration": enable_registration}
     if not enable_registration:
         updated_fields["registration_url"] = None
+    else:
+        if not event.get("registration_url"):
+            await state.set_state(EditEventForm.waiting_for_registration_url)
+            await message.answer("Введите ссылку на регистрацию:", reply_markup=cancel_keyboard())
+            return
+        updated_fields["registration_url"] = event.get("registration_url")
     updated_event = await update_event(event_id=event["id"], updated_fields=updated_fields, bot=None)
     if updated_event:
         logger.info(f"Event {event['id']} enable_registration updated to {enable_registration}")
         event["enable_registration"] = enable_registration
         if not enable_registration:
             event["registration_url"] = None
-        await state.update_data(event=event)
-        if enable_registration:
-            await state.set_state(EditEventForm.waiting_for_registration_url)
-            await message.answer("Введите новую ссылку на регистрацию:", reply_markup=cancel_keyboard())
         else:
-            await message.answer("Доступность регистрации обновлена.", reply_markup=edit_event_keyboard())
-            await state.set_state(EditEventForm.choosing_field)
+            event["registration_url"] = updated_fields.get("registration_url")
+        await state.update_data(event=event)
+        await message.answer("Доступность регистрации обновлена.", reply_markup=edit_event_keyboard())
+        await state.set_state(EditEventForm.choosing_field)
     else:
-        logger.error(f"Failed to update enable_registration for event {event['id']}")
-        await message.answer("Ошибка при обновлении доступности регистрации. Попробуйте снова.", reply_markup=edit_event_keyboard())
+        logger.error(f"Failed to update enable_tickets for event {event['id']}")
+        await message.answer("Ошибка при обновлении доступности билетов. Попробуйте снова.", reply_markup=edit_event_keyboard())
 
 @admin_event_router.message(EditEventForm.waiting_for_registration_url)
 async def process_event_registration_url(message: Message, state: FSMContext):
@@ -1317,8 +1321,6 @@ async def process_event_registration_url(message: Message, state: FSMContext):
         await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
         await state.clear()
         return
-    if new_url.lower() == "отключить":
-        updated_fields = {"registration_url": None, "enable_registration": False}
     else:
         if check_length(new_url, 70):
             await message.answer("Ссылка слишком длинная. Максимальная длина - 70 символов.", reply_markup=cancel_keyboard())
@@ -1332,7 +1334,6 @@ async def process_event_registration_url(message: Message, state: FSMContext):
     if updated_event:
         logger.info(f"Registration URL updated for event {event['id']}")
         event["registration_url"] = updated_fields.get("registration_url")
-        event["enable_registration"] = updated_fields.get("enable_registration", event["enable_registration"])
         await state.update_data(event=event)
         await message.answer("Ссылка на регистрацию обновлена.", reply_markup=edit_event_keyboard())
         await state.set_state(EditEventForm.choosing_field)
@@ -1396,8 +1397,6 @@ async def process_event_ticket_url(message: Message, state: FSMContext):
         await message.answer("Ошибка доступа к мероприятию.", reply_markup=events_management_keyboard())
         await state.clear()
         return
-    if new_url.lower() == "отключить":
-        updated_fields = {"ticket_url": None, "enable_tickets": False}
     else:
         if check_length(new_url, 70):
             await message.answer("Ссылка слишком длинная. Максимальная длина - 70 символов.", reply_markup=cancel_keyboard())
@@ -1406,12 +1405,11 @@ async def process_event_ticket_url(message: Message, state: FSMContext):
             logger.warning(f"Invalid URL: '{new_url}' by user {message.from_user.id}")
             await message.answer("Неверный формат ссылки. Введите корректную ссылку или 'отключить':", reply_markup=cancel_keyboard())
             return
-        updated_fields = {"ticket_url": new_url, "enable_tickets": True}
+        updated_fields = {"ticket_url": new_url}
     updated_event = await update_event(event_id=event["id"], updated_fields=updated_fields, bot=None)
     if updated_event:
         logger.info(f"Ticket URL updated for event {event['id']}")
         event["ticket_url"] = updated_fields.get("ticket_url")
-        event["enable_tickets"] = updated_fields.get("enable_tickets", event["enable_tickets"])
         await state.update_data(event=event)
         await message.answer("Ссылка на покупку билета обновлена.", reply_markup=edit_event_keyboard())
         await state.set_state(EditEventForm.choosing_field)
