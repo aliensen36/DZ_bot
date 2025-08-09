@@ -640,7 +640,7 @@ async def process_time_callback(callback: CallbackQuery, state: FSMContext):
             await state.set_state(PromotionForm.waiting_for_discount_percent)
             await callback.message.answer(
                 f"Время окончания ({time_str}) сохранено. Введите скидку акции:",
-                reply_markup=res_admin_edit_promotion_keyboard()
+                reply_markup=res_admin_cancel_keyboard()
             )
         elif current_state == PromotionEditForm.waiting_for_start_time.state:
             start_date = data.get("start_date")
