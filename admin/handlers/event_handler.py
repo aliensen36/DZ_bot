@@ -251,7 +251,7 @@ async def process_event_description(message: Message, state: FSMContext):
         await message.answer("Описание не может быть пустым. Введите описание:", reply_markup=cancel_keyboard())
         return
     if check_length(description, max_length=100):
-        await message.answer("Описание слишком длинное. Максимальная длина - 500 символов.", reply_markup=cancel_keyboard())
+        await message.answer("Описание слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
         return
     await state.update_data(description=description)
     await state.set_state(EventForm.waiting_for_info)
