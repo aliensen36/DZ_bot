@@ -307,9 +307,9 @@ async def process_promotion_title(message: Message, state: FSMContext):
         logger.warning(f"User {message.from_user.id} provided empty title")
         await message.answer("Название не может быть пустым. Пожалуйста, введите название акции:", reply_markup=res_admin_cancel_keyboard())
         return
-    if check_length(title, 100):
-        logger.warning(f"User {message.from_user.id} provided title longer than 100 characters: {title}")
-        await message.answer("Название акции не может превышать 100 символов. Пожалуйста, введите корректное название:", reply_markup=res_admin_cancel_keyboard())
+    if check_length(title, 50):
+        logger.warning(f"User {message.from_user.id} provided title longer than 50 characters: {title}")
+        await message.answer("Название акции не может превышать 50 символов. Пожалуйста, введите корректное название:", reply_markup=res_admin_cancel_keyboard())
         return
     await state.update_data(title=title)
     await state.set_state(PromotionForm.waiting_for_photo)
@@ -335,9 +335,9 @@ async def process_promotion_description(message: Message, state: FSMContext):
         logger.warning(f"User {message.from_user.id} provided empty description")
         await message.answer("Описание не может быть пустым. Пожалуйста, введите описание акции:", reply_markup=res_admin_cancel_keyboard())
         return
-    if check_length(description, 700):
-        logger.warning(f"User {message.from_user.id} provided description longer than 700 characters: {description}")
-        await message.answer("Описание акции не может превышать 700 символов. Пожалуйста, введите корректное описание:", reply_markup=res_admin_cancel_keyboard())
+    if check_length(description, 750):
+        logger.warning(f"User {message.from_user.id} provided description longer than 750 characters: {description}")
+        await message.answer("Описание акции не может превышать 750 символов. Пожалуйста, введите корректное описание:", reply_markup=res_admin_cancel_keyboard())
         return
     await state.update_data(description=description)
     await state.set_state(PromotionForm.waiting_for_start_date)
@@ -914,7 +914,7 @@ async def process_promotion_title(message: Message, state: FSMContext):
     if not new_title:
         await message.answer("Название не может быть пустым.", reply_markup=res_admin_edit_promotion_keyboard())
         return
-    if check_length(new_title, 100):
+    if check_length(new_title, 50):
         await message.answer("Название не может превышать 100 символов. Пожалуйста, введите корректное название:", reply_markup=res_admin_edit_promotion_keyboard())
         return
 
@@ -958,7 +958,7 @@ async def process_promotion_description(message: Message, state: FSMContext):
         await message.answer("Описание не может быть пустым.", reply_markup=res_admin_edit_promotion_keyboard())
         return
 
-    if check_length(new_description, 700):
+    if check_length(new_description, 750):
         await message.answer("Описание не может превышать 700 символов. Пожалуйста, введите корректное описание:", reply_markup=res_admin_edit_promotion_keyboard())
         return
 

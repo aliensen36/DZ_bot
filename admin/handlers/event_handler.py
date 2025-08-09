@@ -226,8 +226,8 @@ async def process_event_title(message: Message, state: FSMContext):
     if not title:
         await message.answer("Название не может быть пустым. Введите название:", reply_markup=cancel_keyboard())
         return
-    if check_length(title, max_length=100):
-        await message.answer("Название слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
+    if check_length(title, max_length=50):
+        await message.answer("Название слишком длинное. Максимальная длина - 50 символов.", reply_markup=cancel_keyboard())
         return
     await state.update_data(title=title)
     await state.set_state(EventForm.waiting_for_photo)
@@ -263,8 +263,8 @@ async def process_event_info(message: Message, state: FSMContext):
     if not info:
         await message.answer("Информация не может быть пустой. Введите информацию:", reply_markup=cancel_keyboard())
         return
-    if check_length(info, max_length=400):
-        await message.answer("Информация слишком длинная. Максимальная длина - 400 символов.", reply_markup=cancel_keyboard())
+    if check_length(info, max_length=450):
+        await message.answer("Информация слишком длинная. Максимальная длина - 450 символов.", reply_markup=cancel_keyboard())
         return
     await state.update_data(info=info)
     await state.set_state(EventForm.waiting_for_start_date)
@@ -1138,8 +1138,8 @@ async def process_event_title(message: Message, state: FSMContext):
     if not new_title:
         await message.answer("Название не может быть пустым.", reply_markup=cancel_keyboard())
         return
-    if check_length(new_title, 100):
-        await message.answer("Название слишком длинное. Максимальная длина - 100 символов.", reply_markup=cancel_keyboard())
+    if check_length(new_title, 50):
+        await message.answer("Название слишком длинное. Максимальная длина - 50 символов.", reply_markup=cancel_keyboard())
         return
     data = await state.get_data()
     event = data.get("event")
@@ -1217,8 +1217,8 @@ async def process_event_info(message: Message, state: FSMContext):
     if not new_info:
         await message.answer("Информация не может быть пустой.", reply_markup=cancel_keyboard())
         return
-    if check_length(new_info, 400):
-        await message.answer("Информация слишком длинная. Максимальная длина - 400 символов.", reply_markup=cancel_keyboard())
+    if check_length(new_info, 450):
+        await message.answer("Информация слишком длинная. Максимальная длина - 450 символов.", reply_markup=cancel_keyboard())
         return
     data = await state.get_data()
     event = data.get("event")
