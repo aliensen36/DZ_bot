@@ -150,8 +150,23 @@ def residents_management_inline_keyboard() -> InlineKeyboardMarkup:
     return keyboard
 
 
+def get_residents_management_keyboard() -> InlineKeyboardMarkup:
+    """
+    Создает инлайн-клавиатуру для управления резидентами
 
-
+    Returns:
+        types.InlineKeyboardMarkup: Клавиатура с кнопками управления
+    """
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(text="➕ Добавить резидента", callback_data="add_resident"),
+        InlineKeyboardButton(text="✏️ Изменить резидента", callback_data="edit_resident_list"),
+    )
+    builder.row(
+        InlineKeyboardButton(text="🗑 Удалить резидента", callback_data="delete_resident_list"),
+        InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back"),
+    )
+    return builder.as_markup()
 
 
 # Функция для создания инлайн-клавиатуры отмены

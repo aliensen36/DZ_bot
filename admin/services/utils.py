@@ -1,5 +1,6 @@
 import aiohttp
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from data.config import config_settings
 from data.url import url_category, url_resident
@@ -110,46 +111,215 @@ async def show_categories_message(chat_id: int, bot, reply_markup: Optional[Inli
 
 
 # =================================================================================================
-#
+# Резиденты
 # =================================================================================================
 
 
-
-
-
-
-
-# Создание нового резидента
-async def create_new_resident(name: str, category_id: str, description: str):
+async def fetch_categories_with_keyboard(tree: bool = True, cancel_callback: str = "residents_list") -> tuple[
+    list[dict], InlineKeyboardMarkup]:
     """
-    Создаёт нового резидента в DRF API.
+    Получает категории и строит иерархическую клавиатуру (по одной кнопке в ряду)
+    Возвращает кортеж (список категорий, клавиатура)
+    """
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                    f"{url_category}?tree={'true' if tree else 'false'}",
+                    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise Exception(f"Ошибка загрузки категорий: {error_text}")
+
+                categories = await response.json()
+                builder = InlineKeyboardBuilder()
+
+                # Собираем все ID подкатегорий
+                subcategory_ids = set()
+
+                def collect_child_ids(cat):
+                    for child in cat.get('children', []):
+                        subcategory_ids.add(child['id'])
+                        collect_child_ids(child)
+
+                for cat in categories:
+                    collect_child_ids(cat)
+
+                def add_category_buttons(cats, level=0):
+                    for cat in cats:
+                        # Пропускаем подкатегории в основном списке
+                        if level == 0 and cat['id'] in subcategory_ids:
+                            continue
+
+                        # Добавляем кнопку категории в отдельный ряд
+                        btn_text = "    " * level + ("- подкатегория:  " if level > 0 else "") + cat['name']
+                        builder.row(InlineKeyboardButton(
+                            text=btn_text,
+                            callback_data=f"select_category_{cat['id']}"
+                        ))
+
+                        # Рекурсивно добавляем дочерние категории
+                        if cat.get('children'):
+                            add_category_buttons(cat['children'], level + 1)
+
+                add_category_buttons(categories)
+
+                # Добавляем кнопку отмены в отдельный ряд
+                builder.row(InlineKeyboardButton(
+                    text="◀️ Отмена",
+                    callback_data=cancel_callback
+                ))
+
+                return categories, builder.as_markup()
+
+        except Exception as e:
+            raise Exception(f"Ошибка соединения: {str(e)}")
+
+
+async def create_resident_api(resident_data: dict) -> tuple[bool, str]:
+    """
+    Создает нового резидента через API
+    Возвращает кортеж (успех, сообщение)
+    """
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.post(
+                url_resident,
+                json=resident_data,
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 201:
+                    return True, "✅ Резидент успешно добавлен!"
+                else:
+                    error_text = await response.text()
+                    return False, f"❌ Ошибка при добавлении: {error_text}"
+        except Exception as e:
+            return False, f"❌ Ошибка соединения: {str(e)}"
+
+
+async def fetch_residents_list() -> tuple[list[dict] | None, str | None]:
+    """
+    Получает список резидентов из API
+    Возвращает кортеж (список резидентов, None) при успехе или (None, сообщение об ошибке) при ошибке
+    """
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                url_resident,
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 200:
+                    return await response.json(), None
+                else:
+                    error_text = await response.text()
+                    return None, f"❌ Ошибка загрузки: {error_text}"
+        except Exception as e:
+            return None, f"❌ Ошибка соединения: {str(e)}"
+
+
+async def update_resident_category_api(resident_id: int, category_id: int) -> tuple[bool, str]:
+    """
+    Обновляет категорию резидента через API
 
     Args:
-        name: Имя резидента
-        category_id: ID категории (строка или число)
-        description: Описание резидента
+        resident_id: ID резидента
+        category_id: ID новой категории
 
     Returns:
-        dict or None: Данные созданного резидента или None в случае ошибки
+        tuple[bool, str]: (успех, сообщение)
     """
-    url = f"{url_resident}"
-    headers = {"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
-    payload = {
-        "name": name,
-        "category_ids": [int(category_id)],  # Отправляем как список ID
-        "description": description
-    }
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(url, headers=headers, json=payload) as response:
-                print(f"Create resident status: {response.status}")
-                print(f"Payload sent: {payload}")  # Отладка
-                if response.status == 201:
-                    return await response.json()
-                else:
-                    print(f"Error creating resident: {await response.text()}")
-    except aiohttp.ClientError as e:
-        print(f"HTTP Client Error creating resident: {e}")
-    except Exception as e:
-        print(f"Unexpected error creating resident: {e}")
-    return None
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.patch(
+                    f"{url_resident}{resident_id}/",
+                    json={"category_ids": [category_id]},
+                    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 200:
+                    return True, "✅ Категория успешно обновлена!"
+                error_text = await response.text()
+                return False, f"❌ Ошибка обновления: {error_text}"
+        except Exception as e:
+            return False, f"❌ Ошибка соединения: {str(e)}"
+
+
+async def update_resident_field_api(
+        resident_id: int,
+        field: str,
+        value: str | int,
+        headers: dict
+) -> tuple[bool, str]:
+    """
+    Обновляет поле резидента через API
+
+    Args:
+        resident_id: ID резидента
+        field: Название поля для обновления
+        value: Новое значение поля
+        headers: Заголовки запроса
+
+    Returns:
+        tuple[bool, str]: (успех, сообщение)
+    """
+    update_data = {field: value}
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.patch(
+                    f"{url_resident}{resident_id}/",
+                    json=update_data,
+                    headers=headers
+            ) as response:
+                if response.status == 200:
+                    return True, f"✅ Поле {field} успешно обновлено!"
+                error_text = await response.text()
+                return False, f"❌ Ошибка обновления: {error_text}"
+        except Exception as e:
+            return False, f"❌ Ошибка соединения: {str(e)}"
+
+
+async def fetch_residents_for_deletion() -> tuple[list[dict] | None, str | None]:
+    """
+    Получает список резидентов для удаления из API
+
+    Returns:
+        tuple: (список резидентов, None) при успехе или (None, сообщение об ошибке) при ошибке
+    """
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                    url_resident,
+                    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 200:
+                    return await response.json(), None
+                error_text = await response.text()
+                return None, f"❌ Ошибка загрузки: {error_text}"
+        except Exception as e:
+            return None, f"❌ Ошибка соединения: {str(e)}"
+
+
+async def delete_resident_api(resident_id: str) -> tuple[bool, str]:
+    """
+    Удаляет резидента через API
+
+    Args:
+        resident_id: ID резидента для удаления
+
+    Returns:
+        tuple[bool, str]: (успех, сообщение)
+    """
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.delete(
+                    f"{url_resident}{resident_id}/",
+                    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 204:
+                    return True, "✅ Резидент успешно удален!"
+                error_text = await response.text()
+                return False, f"❌ Ошибка удаления: {error_text}"
+        except Exception as e:
+            return False, f"❌ Ошибка соединения: {str(e)}"
+
+
