@@ -8,10 +8,8 @@ import pandas as pd
 from io import BytesIO
 from typing import Tuple, Optional, List, Dict
 
-
 import logging
 logger = logging.getLogger(__name__)
-
 
 
 # =================================================================================================

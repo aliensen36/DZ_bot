@@ -47,6 +47,7 @@ class ResidentForm(StatesGroup):
     waiting_for_entrance = State()
     waiting_for_floor = State()
     waiting_for_office = State()
+    waiting_for_confirmation = State()
 
 
 # =================================================================================================
@@ -396,6 +397,7 @@ async def export_residents_to_excel(callback: CallbackQuery):
         )
         await callback.answer()
 
+
 # =================================================================================================
 # Добавление резидента
 # =================================================================================================
@@ -417,13 +419,29 @@ async def add_resident_start(callback: CallbackQuery, state: FSMContext):
 
 @admin_resident_router.callback_query(F.data.startswith("select_category_"))
 async def select_category(callback: CallbackQuery, state: FSMContext):
-    category_id = callback.data.split("_")[-1]
-    await state.update_data(category_id=category_id)
-    await state.set_state(ResidentForm.waiting_for_name)
-    await callback.message.edit_text(
-        "Введите название резидента:",
-        reply_markup=InlineKeyboardBuilder().button(text="◀️ Отмена", callback_data="add_resident").as_markup()
-    )
+    try:
+        # Получаем ID категории из callback_data
+        category_id = callback.data.split("_")[-1]
+
+        # Получаем название категории из текста кнопки
+        for row in callback.message.reply_markup.inline_keyboard:
+            for button in row:
+                if button.callback_data == callback.data:
+                    category_name = button.text
+                    break
+
+        if not category_name:
+            raise ValueError("Не удалось найти название категории")
+
+        await state.update_data(category_id=category_id, category_name=category_name)
+        await state.set_state(ResidentForm.waiting_for_name)
+        await callback.message.edit_text(
+            "Введите название резидента:",
+            reply_markup=InlineKeyboardBuilder().button(text="◀️ Отмена", callback_data="add_resident").as_markup()
+        )
+    except Exception as e:
+        await callback.message.edit_text(f"❌ Ошибка при выборе категории: {str(e)}")
+        await callback.answer()
 
 
 @admin_resident_router.message(ResidentForm.waiting_for_name)
@@ -508,41 +526,94 @@ async def process_entrance(message: Message, state: FSMContext):
 
 @admin_resident_router.message(ResidentForm.waiting_for_floor)
 async def process_floor(message: Message, state: FSMContext):
-    try:
-        floor = int(message.text)
-        await state.update_data(floor=floor)
-        await state.set_state(ResidentForm.waiting_for_office)
-        await message.answer(
-            "Введите номер офиса:",
-            reply_markup=InlineKeyboardBuilder().button(text="◀️ Отмена", callback_data="residents_list").as_markup()
-        )
-    except ValueError:
-        await message.answer("Некорректный номер этажа")
+    floor = message.text.strip()
+    if not floor:
+        await message.answer("Номер этажа не может быть пустым")
+        return
+
+    await state.update_data(floor=floor)
+    await state.set_state(ResidentForm.waiting_for_office)
+    await message.answer(
+        "Введите номер офиса:",
+        reply_markup=InlineKeyboardBuilder().button(text="◀️ Отмена", callback_data="residents_list").as_markup()
+    )
 
 
 @admin_resident_router.message(ResidentForm.waiting_for_office)
 async def process_office(message: Message, state: FSMContext):
-    try:
-        office = int(message.text)
+    office = message.text.strip()
+    if not office:
+        await message.answer("Номер офиса не может быть пустым")
+        return
 
-        data = await state.get_data()
-        resident_data = {
-            "name": data["name"],
-            "address": data["address"],
-            "building": data["building"],
-            "entrance": data.get("entrance"),
-            "floor": data["floor"],
-            "office": office,
-            "category_ids": [data["category_id"]]
-        }
+    data = await state.get_data()
 
-        success, result_message = await create_resident_api(resident_data)
-        await message.answer(result_message)
+    # Формируем данные резидента
+    resident_data = {
+        "name": data["name"],
+        "address": data["address"],
+        "building": data["building"],
+        "entrance": data.get("entrance"),
+        "floor": data["floor"],
+        "office": office,
+        "category_ids": [data["category_id"]]
+    }
 
-        if success:
-            await state.clear()
-    except ValueError:
-        await message.answer("Некорректный номер офиса")
+    # Формируем сообщение с данными
+    summary_message = (
+        "📝 Проверьте данные нового резидента:\n\n"
+        f"🏢 Наименование: {data['name']}\n"
+        f"📍 Адрес: {data['address']}\n"
+        f"🏗 Строение: {data['building']}\n"
+        f"🚪 Вход: {data.get('entrance', 'не указан')}\n"
+        f"🛗 Этаж: {data['floor']}\n"
+        f"🚪 Офис: {office}\n"
+        f"🏷 Категория: {data['category_name']}\n\n"
+        "Подтвердите создание:"
+    )
+
+    # Создаем клавиатуру с кнопками подтверждения
+    keyboard = InlineKeyboardBuilder()
+    keyboard.button(text="✅ Подтвердить", callback_data="confirm_create_resident")
+    keyboard.button(text="❌ Отменить", callback_data="cancel_resident_creation")
+
+    # Сохраняем данные в state для использования при подтверждении
+    await state.update_data(resident_data=resident_data)
+
+    # Отправляем сообщение с данными и кнопками
+    await message.answer(
+        summary_message,
+        reply_markup=keyboard.as_markup()
+    )
+    await state.set_state(ResidentForm.waiting_for_confirmation)
+
+
+
+# Обработчик подтверждения создания
+@admin_resident_router.callback_query(F.data == "confirm_create_resident", ResidentForm.waiting_for_confirmation)
+async def confirm_create_resident(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    resident_data = data["resident_data"]
+
+    success, result_message = await create_resident_api(resident_data)
+    await callback.message.answer(result_message)
+
+    if success:
+        await state.clear()
+    await callback.answer()
+
+
+# Обработчик отмены создания
+@admin_resident_router.callback_query(F.data == "cancel_resident_creation", ResidentForm.waiting_for_confirmation)
+async def cancel_resident_creation(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("❌ Создание резидента отменено")
+    await state.clear()
+    await callback.answer()
+
+
+# =================================================================================================
+# Редактирование резидента
+# =================================================================================================
 
 
 # Редактирование резидента - список
