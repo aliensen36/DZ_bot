@@ -65,9 +65,9 @@ def setup_routers(dp: Dispatcher) -> None:
         admin_router,
         admin_mailing_router,
         admin_event_router,
-        admin_resident_router,
         admin_promotion_router,
         admin_points_settings_router,
+        admin_resident_router,
     )
     for router in routers:
         dp.include_router(router)
