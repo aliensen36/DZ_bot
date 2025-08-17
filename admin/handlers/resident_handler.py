@@ -1,7 +1,8 @@
 import aiohttp
 from aiogram import F, Router
 from aiogram.fsm.state import StatesGroup, State
-from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, ReplyKeyboardRemove, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, \
+    BufferedInputFile
 from aiogram.filters import StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import ReplyKeyboardBuilder, InlineKeyboardBuilder
@@ -11,7 +12,7 @@ from admin.keyboards.admin_inline import residents_management_inline_keyboard, \
 from admin.services.utils import fetch_categories, \
     create_category, delete_category, show_categories_message, fetch_categories_with_keyboard, create_resident_api, \
     fetch_residents_list, update_resident_category_api, update_resident_field_api, fetch_residents_for_deletion, \
-    delete_resident_api
+    delete_resident_api, generate_residents_excel
 from data.config import config_settings
 from admin.keyboards.admin_reply import admin_keyboard, residents_management_keyboard, get_back_keyboard
 from data.url import url_resident, url_category
@@ -281,7 +282,7 @@ async def back_to_admin_menu_callback(callback: CallbackQuery):
 
 
 # =================================================================================================
-# Добавление нового резидента
+# Резиденты
 # =================================================================================================
 
 
@@ -291,6 +292,113 @@ async def residents_list(callback: CallbackQuery):
         "Управление резидентами",
         reply_markup=get_residents_management_keyboard()
     )
+
+
+# =================================================================================================
+# Список резидентов
+# =================================================================================================
+
+
+@admin_resident_router.callback_query(F.data == "show_residents_list")
+async def show_residents_list(callback: CallbackQuery):
+    residents, error = await fetch_residents_list()
+
+    if error:
+        # Проверяем, нужно ли редактировать сообщение или отправить новое
+        if callback.message.text != f"❌ {error}":
+            await callback.message.edit_text(
+                f"❌ {error}",
+                reply_markup=get_residents_management_keyboard()
+            )
+        return
+
+    if not residents:
+        if callback.message.text != "Список резидентов пуст":
+            await callback.message.edit_text(
+                "Список резидентов пуст",
+                reply_markup=get_residents_management_keyboard()
+            )
+        return
+
+    # Формируем список
+    new_text = "📋 Список резидентов:\n\n" + "\n".join(
+        f"{idx}. {r['name']}" for idx, r in enumerate(residents, 1)
+    )
+
+    # Создаем клавиатуру
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="📊 Выгрузить в Excel",
+            callback_data="export_residents_to_excel"
+        )
+    )
+    builder.row(
+        InlineKeyboardButton(
+            text="◀️ Назад",
+            callback_data="back_to_residents_management"
+        )
+    )
+    new_markup = builder.as_markup()
+
+    # Проверяем, изменились ли текст или клавиатура
+    if (callback.message.text != new_text or
+            str(callback.message.reply_markup) != str(new_markup)):
+        await callback.message.edit_text(
+            new_text,
+            reply_markup=new_markup
+        )
+
+
+@admin_resident_router.callback_query(F.data == "export_residents_to_excel")
+async def export_residents_to_excel(callback: CallbackQuery):
+    excel_file, error = await generate_residents_excel()
+
+    if error:
+        if callback.message.text != f"❌ {error}":
+            await callback.message.answer(
+                f"❌ {error}",
+                reply_markup=get_residents_management_keyboard()
+            )
+        await callback.answer()
+        return
+
+    try:
+        await callback.answer()
+        # Сбрасываем указатель файла
+        excel_file.seek(0)
+        # Отправляем файл
+        await callback.message.answer_document(
+            document=BufferedInputFile(
+                excel_file.read(),
+                filename="residents.xlsx"
+            ),
+            caption="Полный список резидентов"
+        )
+
+        # Отправляем отдельное сообщение с кнопкой "Назад"
+        await callback.message.answer(
+            "Вернуться к управлению резидентами",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text="◀️ Назад",
+                        callback_data="back_to_residents_management"
+                    )]
+                ]
+            )
+        )
+
+    except Exception as e:
+        await callback.message.answer(
+            f"❌ Ошибка при отправке файла: {str(e)}",
+            reply_markup=get_residents_management_keyboard()
+        )
+        await callback.answer()
+
+# =================================================================================================
+# Добавление резидента
+# =================================================================================================
 
 
 # Добавление резидента - выбор категории
@@ -393,7 +501,7 @@ async def process_entrance(message: Message, state: FSMContext):
     await state.update_data(entrance=entrance)
     await state.set_state(ResidentForm.waiting_for_floor)
     await message.answer(
-        "Введите номер этажа (1-5):",
+        "Введите номер этажа:",
         reply_markup=InlineKeyboardBuilder().button(text="◀️ Отмена", callback_data="residents_list").as_markup()
     )
 
@@ -402,16 +510,14 @@ async def process_entrance(message: Message, state: FSMContext):
 async def process_floor(message: Message, state: FSMContext):
     try:
         floor = int(message.text)
-        if floor < 1 or floor > 5:
-            raise ValueError
         await state.update_data(floor=floor)
         await state.set_state(ResidentForm.waiting_for_office)
         await message.answer(
-            "Введите номер офиса (1-66):",
+            "Введите номер офиса:",
             reply_markup=InlineKeyboardBuilder().button(text="◀️ Отмена", callback_data="residents_list").as_markup()
         )
     except ValueError:
-        await message.answer("Некорректный этаж! Введите число от 1 до 5:")
+        await message.answer("Некорректный номер этажа")
 
 
 @admin_resident_router.message(ResidentForm.waiting_for_office)
@@ -436,7 +542,7 @@ async def process_office(message: Message, state: FSMContext):
         if success:
             await state.clear()
     except ValueError:
-        await message.answer("Некорректный номер офиса! Введите целое число:")
+        await message.answer("Некорректный номер офиса")
 
 
 # Редактирование резидента - список

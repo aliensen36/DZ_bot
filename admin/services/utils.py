@@ -1,10 +1,13 @@
 import aiohttp
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-
 from data.config import config_settings
 from data.url import url_category, url_resident
 from typing import Optional
+import pandas as pd
+from io import BytesIO
+from typing import Tuple, Optional, List, Dict
+
 
 import logging
 logger = logging.getLogger(__name__)
@@ -215,6 +218,111 @@ async def fetch_residents_list() -> tuple[list[dict] | None, str | None]:
                     return None, f"❌ Ошибка загрузки: {error_text}"
         except Exception as e:
             return None, f"❌ Ошибка соединения: {str(e)}"
+
+
+async def generate_residents_excel() -> Tuple[Optional[BytesIO], Optional[str]]:
+    """
+    Генерирует Excel файл с данными резидентов с улучшенным форматированием.
+
+    Returns:
+        Tuple[Optional[BytesIO], Optional[str]]:
+            - BytesIO объект с Excel файлом в случае успеха
+            - Сообщение об ошибке, если что-то пошло не так
+    """
+    residents, error = await fetch_residents_list()
+    if error:
+        return None, error
+
+    try:
+        # Создаем DataFrame
+        df = pd.DataFrame(residents)
+
+        # Добавляем категории
+        for resident in residents:
+            categories = ", ".join([cat['name'] for cat in resident.get('categories', [])])
+            df.loc[df['id'] == resident['id'], 'categories'] = categories
+
+        # Переименовываем столбцы согласно модели
+        column_mapping = {
+            'name': 'Наименование',
+            'description': 'Описание',
+            'info': 'Доп.инфо',
+            'working_time': 'График работы',
+            'email': 'Email',
+            'phone_number': 'Номер телефона',
+            'official_website': 'Сайт',
+            'address': 'Адрес',
+            'building': 'Стр.',
+            'entrance': 'Вход',
+            'floor': 'Этаж',
+            'office': 'Офис/Пом.',
+            'photo': 'Фото',
+            'pin_code': 'Пин-код',
+            'categories': 'Категории'
+        }
+
+        # Применяем переименование и оставляем только нужные столбцы
+        df = df.rename(columns=column_mapping)
+        df = df[column_mapping.values()]
+
+        # Создаем файл в памяти
+        output = BytesIO()
+
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            # Записываем данные в Excel
+            df.to_excel(writer, index=False, sheet_name='Резиденты')
+
+            # Получаем объект листа
+            worksheet = writer.sheets['Резиденты']
+
+            # Создаем стили для форматирования
+            from openpyxl.styles import Font, Alignment, Border, Side
+
+            # Стиль для заголовков
+            header_font = Font(bold=True)
+            header_alignment = Alignment(horizontal='center', vertical='center')
+            thin_border = Border(left=Side(style='thin'),
+                                 right=Side(style='thin'),
+                                 top=Side(style='thin'),
+                                 bottom=Side(style='thin'))
+
+            # Применяем стиль к заголовкам
+            for cell in worksheet[1]:
+                cell.font = header_font
+                cell.alignment = header_alignment
+                cell.border = thin_border
+
+            # Устанавливаем ширину колонок
+            for column in worksheet.columns:
+                max_length = 0
+                column_letter = column[0].column_letter
+
+                # Определяем максимальную длину содержимого
+                for cell in column:
+                    try:
+                        if len(str(cell.value)) > max_length:
+                            max_length = len(str(cell.value))
+                    except:
+                        pass
+
+                # Устанавливаем ширину с небольшим запасом
+                adjusted_width = (max_length + 2)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+
+            # Добавляем автофильтр
+            worksheet.auto_filter.ref = worksheet.dimensions
+
+            # Стиль для обычных ячеек
+            cell_alignment = Alignment(horizontal='left', vertical='center')
+            for row in worksheet.iter_rows(min_row=2):
+                for cell in row:
+                    cell.alignment = cell_alignment
+
+        output.seek(0)
+        return output, None
+
+    except Exception as e:
+        return None, f"Ошибка генерации Excel: {str(e)}"
 
 
 async def update_resident_category_api(resident_id: int, category_id: int) -> tuple[bool, str]:
