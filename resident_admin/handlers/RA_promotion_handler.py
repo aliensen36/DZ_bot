@@ -69,7 +69,7 @@ def format_promotion_text(promotion: dict) -> str:
         f"{promotion['description']}\n"
         f"{format_datetime(promotion.get('start_date'))} - {format_datetime(promotion.get('end_date'))}\n"
         f"{promotion['discount_percent']}{'%'}\n"
-        f"{promotion['promotional_code']}"
+        f"{promotion['promotional_code']}\n"
         f"Ожидайте подтверждения администратора."
     )
 

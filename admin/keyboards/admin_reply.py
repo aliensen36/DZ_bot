@@ -95,6 +95,7 @@ def edit_points_system_settings_keyboard():
     builder = ReplyKeyboardBuilder()
     builder.button(text="Изменить баллы за 100 рублей")
     builder.button(text="Изменить баллы за 1% скидки")
+    builder.button(text="Изменить баллы за регистрацию нового пользователя")
     builder.button(text="Назад")
     builder.adjust(1)
     return builder.as_markup(resize_keyboard=True)
