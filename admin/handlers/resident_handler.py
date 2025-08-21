@@ -17,6 +17,7 @@ from data.config import config_settings
 from admin.keyboards.admin_reply import admin_keyboard, residents_management_keyboard, get_back_keyboard
 from data.url import url_resident, url_category
 from utils.filters import ChatTypeFilter, IsGroupAdmin, ADMIN_CHAT_ID
+from admin.handlers.points_system_settings import EditPointsSystemSettingsStates
 
 import logging
 logger = logging.getLogger(__name__)
@@ -754,7 +755,7 @@ async def update_resident_field(message: Message, state: FSMContext):
     data = await state.get_data()
     field = data.get("edit_field")
     resident_id = data.get("resident_id")
-
+    
     if not field or not resident_id:
         await message.answer("❌ Ошибка: не найдены данные для обновления")
         await state.clear()

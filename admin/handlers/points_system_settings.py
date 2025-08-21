@@ -175,6 +175,7 @@ async def handle_field_selection(message: Message, state: FSMContext):
     StateFilter(EditPointsSystemSettingsStates.waiting_for_points_per_100_rubles)
 )
 async def handle_edit_points_per_100_rubles(message: Message, state: FSMContext):
+    logger.warning(f"handle_edit_points_per_100_rubles called with message: {message.text}")
     try:
         points = int(message.text)
         if points <= 0:
@@ -203,9 +204,10 @@ async def handle_edit_points_per_100_rubles(message: Message, state: FSMContext)
     if success:
         await message.answer(
             f"Бонусы за 100 рублей успешно изменены на {points}!",
-            reply_markup=points_system_settings_keyboard(),
+            reply_markup=edit_points_system_settings_keyboard(),
             parse_mode=None
         )
+        await state.set_state(EditPointsSystemSettingsStates.choosing_field)
     else:
         await message.answer(
             "Ошибка при обновлении настроек. Попробуйте позже.",
@@ -245,9 +247,10 @@ async def handle_edit_points_per_1_percent(message: Message, state: FSMContext):
     if success:
         await message.answer(
             f"Бонусы за 1% скидки успешно изменены на {points}!",
-            reply_markup=points_system_settings_keyboard(),
+            reply_markup=edit_points_system_settings_keyboard(),
             parse_mode=None
         )
+        await state.set_state(EditPointsSystemSettingsStates.choosing_field)
     else:
         await message.answer(
             "Ошибка при обновлении настроек. Попробуйте позже.",
@@ -288,9 +291,10 @@ async def handle_edit_new_user_points(message: Message, state: FSMContext):
     if success:
         await message.answer(
             f"Бонусы для нового пользователя изменены на {points}!",
-            reply_markup=points_system_settings_keyboard(),
+            reply_markup=edit_points_system_settings_keyboard(),
             parse_mode=None
         )
+        await state.set_state(EditPointsSystemSettingsStates.choosing_field)
     else:
         await message.answer(
             "Ошибка при обновлении настроек. Попробуйте позже.",
@@ -353,7 +357,7 @@ async def handle_new_user_points(message: Message, state: FSMContext):
     success = await create_points_system_settings({
         "points_per_100_rubles": data["points_per_100_rubles"],
         "points_per_1_percent": data["points_per_1_percent"],
-        "new_user_poinrs": data["new_user_points"]
+        "new_user_points": data["new_user_points"]
     })
     await state.clear()
     if success:
