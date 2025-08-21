@@ -115,9 +115,9 @@ async def points_system_settings_menu(message: Message, state: FSMContext):
     else:
         await message.answer(
             "Текущие настройки бонусной системы:\n"
-            f"Баллы за 100 рублей: {settings.get('points_per_100_rubles')}\n"
-            f"Баллы за 1% скидки: {settings.get('points_per_1_percent')}\n"
-            f"Быллы для нового пользователя: {settings.get('new_user_points', 0)}\n"
+            f"Бонусы за 100 рублей: {settings.get('points_per_100_rubles')}\n"
+            f"Бонусы за 1% скидки: {settings.get('points_per_1_percent')}\n"
+            f"Бонусы для нового пользователя: {settings.get('new_user_points', 0)}\n"
             "Выберите действие с настройками бонусной системы:",
             reply_markup=points_system_settings_keyboard(),
             parse_mode=None
@@ -145,25 +145,25 @@ async def show_edit_points_settings_menu(message: Message, state: FSMContext):
 
 @admin_points_settings_router.message(
     StateFilter(EditPointsSystemSettingsStates.choosing_field),
-    F.text.in_(["Изменить баллы за 100 рублей", "Изменить баллы за 1% скидки", "Изменить баллы за регистрацию нового пользователя"])
+    F.text.in_(["Изменить бонусы за 100 рублей", "Изменить бонусы за 1% скидки", "Изменить бонусы за регистрацию нового пользователя"])
 )
 async def handle_field_selection(message: Message, state: FSMContext):
     logger.debug(f"User {message.from_user.id} selected field: {message.text}")
-    if message.text == "Изменить баллы за 100 рублей":
+    if message.text == "Изменить бонусы за 100 рублей":
         await message.answer(
-            "Введите новое значение для баллов за 100 рублей:",
+            "Введите новое значение для бонусов за 100 рублей:",
             reply_markup=cancel_keyboard(),
             parse_mode=None
         )
         await state.set_state(EditPointsSystemSettingsStates.waiting_for_points_per_100_rubles)
-    elif message.text == "Изменить баллы за 1% скидки":
+    elif message.text == "Изменить бонусы за 1% скидки":
         await message.answer(
-            "Введите новое значение для баллов за 1% скидки:",
+            "Введите новое значение для бонусов за 1% скидки:",
             reply_markup=cancel_keyboard(),
             parse_mode=None
         )
         await state.set_state(EditPointsSystemSettingsStates.waiting_for_points_per_1_percent)
-    elif message.text == "Изменить баллы за регистрацию нового пользователя":
+    elif message.text == "Изменить бонусы за регистрацию нового пользователя":
         await message.answer(
             "Введите количество бонусов, которые будут начислены новому пользователю при регистрации:",
             reply_markup=cancel_keyboard(),
@@ -202,7 +202,7 @@ async def handle_edit_points_per_100_rubles(message: Message, state: FSMContext)
     await state.clear()
     if success:
         await message.answer(
-            f"Баллы за 100 рублей успешно изменены на {points}!",
+            f"Бонусы за 100 рублей успешно изменены на {points}!",
             reply_markup=points_system_settings_keyboard(),
             parse_mode=None
         )
@@ -244,7 +244,7 @@ async def handle_edit_points_per_1_percent(message: Message, state: FSMContext):
     await state.clear()
     if success:
         await message.answer(
-            f"Баллы за 1% скидки успешно изменены на {points}!",
+            f"Бонусы за 1% скидки успешно изменены на {points}!",
             reply_markup=points_system_settings_keyboard(),
             parse_mode=None
         )
@@ -287,7 +287,7 @@ async def handle_edit_new_user_points(message: Message, state: FSMContext):
     await state.clear()
     if success:
         await message.answer(
-            f"Баллы для нового пользователя изменены на {points}!",
+            f"Бонусы для нового пользователя изменены на {points}!",
             reply_markup=points_system_settings_keyboard(),
             parse_mode=None
         )
@@ -359,9 +359,9 @@ async def handle_new_user_points(message: Message, state: FSMContext):
     if success:
         await message.answer(
             "Настройки бонусной системы успешно созданы:\n"
-            f"Баллы за 100 рублей: {data.get('points_per_100_rubles')}\n"
-            f"Баллы за 1% скидки: {data.get('points_per_1_percent')}\n"
-            f"Быллы для нового пользователя: {data.get('new_user_points', 0)}\n"
+            f"Бонусы за 100 рублей: {data.get('points_per_100_rubles')}\n"
+            f"Бонусы за 1% скидки: {data.get('points_per_1_percent')}\n"
+            f"Бонусы для нового пользователя: {data.get('new_user_points', 0)}\n"
             "Выберите действие с настройками бонусной системы:",
             reply_markup=points_system_settings_keyboard(),
             parse_mode=None

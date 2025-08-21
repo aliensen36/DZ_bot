@@ -156,7 +156,7 @@ async def process_transaction_type(callback: CallbackQuery, state: FSMContext):
     """Обработка выбора типа транзакции (начисление)."""
     if callback.data == "transaction_accrue":
         await callback.message.answer(
-            "Введите сумму покупки для начисления баллов (в рублях):",
+            "Введите сумму покупки для начисления бонусов (в рублях):",
             reply_markup=back_to_menu_kb)
         await state.set_state(TransactionFSM.price)
         await state.update_data(transaction_type="accrue")
@@ -165,7 +165,7 @@ async def process_transaction_type(callback: CallbackQuery, state: FSMContext):
 @RA_bonus_router.message(TransactionFSM.price)
 @resident_required
 async def process_transaction_price(message: Message, state: FSMContext):
-    """Обработка суммы для начисления баллов."""
+    """Обработка суммы для начисления бонусов."""
     try:
         price = float(message.text.strip())
         if price <= 0:
@@ -241,7 +241,7 @@ async def process_transaction_price(message: Message, state: FSMContext):
                             await message.answer_photo(
                                 photo=BufferedInputFile(card_data['card_image'], filename=f"card_{card_number}.png"),
                                 caption=(
-                                    f"Начислено баллов: <b>{points}</b>\n\n"
+                                    f"Начислено бонусов: <b>{points}</b>\n\n"
                                     f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                     f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})"
                                 ),
@@ -250,7 +250,7 @@ async def process_transaction_price(message: Message, state: FSMContext):
                             )
                         else:
                             await message.answer(
-                                f"Начислено баллов: <b>{points}</b>\n\n"
+                                f"Начислено бонусов: <b>{points}</b>\n\n"
                                 f"за покупку на сумму <b>{price}</b> руб.\n\n"
                                 f"Карта: {card_number} (Клиент: {user_data['user_first_name']} {user_data['user_last_name']})",
                                 reply_markup=back_to_menu_kb,
@@ -259,7 +259,7 @@ async def process_transaction_price(message: Message, state: FSMContext):
                         await state.set_state(None)
                     else:
                         error_data = await resp.json()
-                        error_msg = error_data.get('error', 'Неизвестная ошибка при начислении баллов')
+                        error_msg = error_data.get('error', 'Неизвестная ошибка при начислении бонусов')
                         await message.answer(
                             f"Ошибка:\n<b>{error_msg}</b>.\nПопробуйте ещё раз.",
                             reply_markup=back_to_menu_kb,
