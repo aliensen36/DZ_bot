@@ -35,6 +35,7 @@ async def cmd_start(message: AiogramMessage, state: FSMContext):
     Notes:
         Выполняет POST-запрос к API для регистрации и отправляет приветствие в зависимости от статуса (200 или 201).
     """
+    await state.clear()
     parts = message.text.split()
     referral_code = parts[1] if len(parts) > 1 else None
     
@@ -256,9 +257,3 @@ async def send_webapp_button(message: Message):
         "Для перехода в приложение нажмите кнопку ниже.",
         reply_markup=webapp_kb
     )
-
-
-@start_router.message(F.text == "/start")
-async def cmd_start(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("Бот перезапущен. Состояние сброшено.")
