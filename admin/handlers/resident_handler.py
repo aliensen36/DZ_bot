@@ -12,7 +12,7 @@ from admin.keyboards.admin_inline import residents_management_inline_keyboard, \
 from admin.services.utils import fetch_categories, \
     create_category, delete_category, show_categories_message, fetch_categories_with_keyboard, create_resident_api, \
     fetch_residents_list, update_resident_category_api, update_resident_field_api, fetch_residents_for_deletion, \
-    delete_resident_api, generate_residents_excel
+    delete_resident_api, generate_residents_excel, fetch_category_name, fetch_resident_data
 from data.config import config_settings
 from admin.keyboards.admin_reply import admin_keyboard, residents_management_keyboard, get_back_keyboard
 from data.url import url_resident, url_category
@@ -48,6 +48,10 @@ class ResidentForm(StatesGroup):
     waiting_for_entrance = State()
     waiting_for_floor = State()
     waiting_for_office = State()
+    waiting_for_confirmation = State()
+
+
+class EditResidentForm(StatesGroup):
     waiting_for_confirmation = State()
 
 
@@ -617,6 +621,17 @@ async def cancel_resident_creation(callback: CallbackQuery, state: FSMContext):
 # =================================================================================================
 
 
+FIELD_TRANSLATIONS = {
+    "name": "Название",
+    "category": "Категория",
+    "address": "Адрес",
+    "building": "Строение",
+    "entrance": "Вход",
+    "floor": "Этаж",
+    "office": "Офис"
+}
+
+
 # Редактирование резидента - список
 @admin_resident_router.callback_query(F.data == "edit_resident_list")
 async def edit_resident_list(callback: CallbackQuery):
@@ -641,6 +656,7 @@ async def edit_resident_list(callback: CallbackQuery):
         "Выберите резидента для редактирования:",
         reply_markup=builder.as_markup()
     )
+
 
 # Редактирование резидента - выбор поля
 @admin_resident_router.callback_query(F.data.startswith("edit_resident_"))
@@ -676,97 +692,279 @@ async def edit_resident_select_field(callback: CallbackQuery, state: FSMContext)
     )
 
 
-async def edit_resident_category(callback: CallbackQuery, state: FSMContext):
-    """Отображает иерархию категорий для выбора"""
-    try:
-        # Получаем категории через API
-        categories_response = await fetch_categories(tree=True)
+# Для подтверждения изменений полей
+@admin_resident_router.message()
+async def handle_resident_field_input(message: Message, state: FSMContext):
+    data = await state.get_data()
+    field_code = data.get("edit_field")
+    resident_id = data.get("resident_id")
 
-        if "error" in categories_response:
-            await callback.message.edit_text(f"❌ {categories_response['error']}")
+    if not field_code or not resident_id:
+        await message.answer("❌ Ошибка: не найдены данные для обновления")
+        await state.clear()
+        return
+
+    # Получаем русское название поля
+    field_name = FIELD_TRANSLATIONS.get(field_code, field_code)  # Теперь используем глобальную переменную
+    new_value = message.text
+
+    # Получаем текущие данные резидента
+    resident_data, error = await fetch_resident_data(resident_id)
+    if error:
+        await message.answer(error)
+        await state.clear()
+        return
+
+    # Получаем старое значение
+    old_value = resident_data.get(field_code, "Не указано")
+    if old_value is None:
+        old_value = "Не указано"
+
+    # Сохраняем данные для подтверждения
+    await state.update_data(
+        field_code=field_code,
+        field_name=field_name,
+        old_value=old_value,
+        new_value=new_value,
+        resident_name=resident_data.get('name', 'Неизвестный резидент')
+    )
+
+    # Показываем подтверждение
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Подтвердить",
+            callback_data=f"confirm_field_update_{field_code}"
+        ),
+        InlineKeyboardButton(
+            text="❌ Отменить",
+            callback_data=f"back_to_edit_{resident_id}"
+        )
+    )
+
+    await message.answer(
+        f"📋 <b>Подтверждение изменения</b>\n\n"
+        f"🏢 <b>Резидент:</b> {resident_data.get('name', 'Неизвестный')}\n"
+        f"📝 <b>Поле:</b> {field_name}\n"
+        f"📄 <b>Текущее значение:</b> {old_value}\n"
+        f"🆕 <b>Новое значение:</b> {new_value}\n\n"
+        f"Вы уверены, что хотите изменить?",
+        reply_markup=builder.as_markup()
+    )
+
+
+async def show_category_selection(callback: CallbackQuery, state: FSMContext, resident_id: str):
+    """Показывает выбор категории с предварительной загрузкой текущей категории"""
+    try:
+        data = await state.get_data()
+
+        # Получаем текущие данные резидента
+        resident_data, error = await fetch_resident_data(resident_id)
+        if error:
+            await callback.message.edit_text(error)
             return
 
-        # Строим иерархическую клавиатуру
+        current_category_id = None
+        current_category_name = "Не указана"
+
+        # Получаем категории из массива объектов
+        if resident_data.get('categories') and len(resident_data['categories']) > 0:
+            current_category_id = resident_data['categories'][0]['id']
+            current_category_name = resident_data['categories'][0]['name']
+
+        categories = await fetch_categories(tree=True)
+
+        if isinstance(categories, dict) and "error" in categories:
+            await callback.message.edit_text(f"❌ {categories['error']}")
+            return
+
         builder = InlineKeyboardBuilder()
 
-        def build_category_buttons(categories, level=0):
-            for category in categories:
+        def build_category_buttons(categories_list, level=0):
+            for category in categories_list:
                 indent = "    " * level
+                # Добавляем отметку для текущей категории
+                is_current = category['id'] == current_category_id
+                current_marker = " ✅" if is_current else ""
+
                 builder.add(InlineKeyboardButton(
-                    text=f"{indent}📌 {category['name']}",
+                    text=f"{indent}📌 {category['name']}{current_marker}",
                     callback_data=f"update_category_{category['id']}"
                 ))
                 if category.get('children'):
                     build_category_buttons(category['children'], level + 1)
 
-        build_category_buttons(categories_response)
+        build_category_buttons(categories)
 
-        # Добавляем кнопку отмены
         builder.row(InlineKeyboardButton(
             text="◀️ Отмена",
-            callback_data=lambda: edit_resident_select_field(callback, state)
+            callback_data=f"back_to_edit_{resident_id}"
         ))
 
-        # Отправляем сообщение с клавиатурой
         await callback.message.edit_text(
-            "Выберите новую категорию:",
+            f"📋 <b>Выбор новой категории</b>\n\n"
+            f"🏢 <b>Резидент:</b> {resident_data.get('name', 'Неизвестный')}\n"
+            f"📁 <b>Текущая категория:</b> {current_category_name}\n\n"
+            f"Выберите новую категорию:",
             reply_markup=builder.as_markup()
         )
 
     except Exception as e:
         await callback.message.edit_text(f"❌ Ошибка: {str(e)}")
+
+
 # Обработка редактирования полей
 @admin_resident_router.callback_query(F.data.startswith("edit_field_"))
 async def edit_resident_field(callback: CallbackQuery, state: FSMContext):
-    field = callback.data.split("_")[-1]
-    await state.update_data(edit_field=field)
+    field_code = callback.data.split("_")[-1]
+    await state.update_data(edit_field=field_code)
 
-    if field == "category":
-        await edit_resident_category(callback, state)
+    data = await state.get_data()
+    resident_id = data.get('resident_id')
+
+    # Получаем русское название поля из словаря
+    field_name = FIELD_TRANSLATIONS.get(field_code, field_code)
+
+    if field_code == "category":
+        await show_category_selection(callback, state, resident_id)
     else:
+        # Получаем текущее значение поля
+        resident_data, error = await fetch_resident_data(resident_id)
+        if error:
+            await callback.message.edit_text(error)
+            return
+
+        current_value = resident_data.get(field_code, "Не указано")
+        if current_value is None:
+            current_value = "Не указано"
+
+        builder = InlineKeyboardBuilder()
+        builder.button(
+            text="◀️ Отмена",
+            callback_data=f"back_to_edit_{resident_id}"
+        )
+
         await callback.message.edit_text(
-            f"Введите новое значение для поля {field}:",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ Отмена",
-                callback_data=lambda: edit_resident_select_field(callback, state)
-            ).as_markup()
+            f"✏️ <b>Редактирование {field_name}</b>\n\n"
+            f"🏢 <b>Резидент:</b> {resident_data.get('name', 'Неизвестный')}\n"
+            f"📄 <b>Текущее значение:</b> {current_value}\n\n"
+            f"Введите новое значение для поля {field_name}:",
+            reply_markup=builder.as_markup()
         )
 
 
 @admin_resident_router.callback_query(F.data.startswith("update_category_"))
 async def update_resident_category(callback: CallbackQuery, state: FSMContext):
-    category_id = int(callback.data.split("_")[-1])
+    new_category_id = int(callback.data.split("_")[-1])
     data = await state.get_data()
+    resident_id = data['resident_id']
 
-    success, message = await update_resident_category_api(
-        resident_id=data['resident_id'],
-        category_id=category_id
+    # Получаем данные резидента
+    resident_data, error = await fetch_resident_data(resident_id)
+    if error:
+        await callback.message.edit_text(error)
+        return
+
+    old_category_name = "Не указана"
+
+    # Получаем категории из массива объектов
+    if resident_data.get('categories') and len(resident_data['categories']) > 0:
+        old_category_name = resident_data['categories'][0]['name']
+
+    new_category_name = await fetch_category_name(new_category_id)
+
+    # Сохраняем данные для подтверждения
+    await state.update_data(
+        new_category_id=new_category_id,
+        old_category_name=old_category_name,
+        new_category_name=new_category_name,
+        resident_name=resident_data.get('name', 'Неизвестный резидент')
     )
 
-    await callback.message.edit_text(message)
-    await state.clear()
+    # Показываем подтверждение
+    builder = InlineKeyboardBuilder()
+    builder.row(
+        InlineKeyboardButton(
+            text="✅ Подтвердить",
+            callback_data=f"confirm_category_update_{new_category_id}"
+        ),
+        InlineKeyboardButton(
+            text="❌ Отменить",
+            callback_data=f"back_to_edit_{resident_id}"
+        )
+    )
+
+    await callback.message.edit_text(
+        f"📋 <b>Подтверждение изменения категории</b>\n\n"
+        f"🏢 <b>Резидент:</b> {resident_data.get('name', 'Неизвестный')}\n"
+        f"📁 <b>Текущая категория:</b> {old_category_name}\n"
+        f"🆕 <b>Новая категория:</b> {new_category_name}\n\n"
+        f"Вы уверены, что хотите изменить категорию?",
+        reply_markup=builder.as_markup()
+    )
+
+
+@admin_resident_router.callback_query(F.data.startswith("confirm_category_update_"))
+async def confirm_category_update(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    resident_id = data['resident_id']
+    new_category_id = data['new_category_id']
+
+    # Выполняем обновление
+    success, message = await update_resident_category_api(
+        resident_id=resident_id,
+        category_id=new_category_id
+    )
 
     if success:
-        await edit_resident_list(callback)
+        # Показываем результат с деталями
+        await callback.message.edit_text(
+            f"✅ <b>Категория успешно обновлена!</b>\n\n"
+            f"🏢 <b>Резидент:</b> {data['resident_name']}\n"
+            f"📁 <b>Было:</b> {data['old_category_name']}\n"
+            f"🆕 <b>Стало:</b> {data['new_category_name']}\n\n"
+            f"Вы можете продолжить редактирование или вернуться назад."
+        )
+
+        # Добавляем кнопки для продолжения
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(
+                text="✏️ Продолжить редактирование",
+                callback_data=f"back_to_edit_{resident_id}"
+            ),
+            InlineKeyboardButton(
+                text="◀️ Назад к списку",
+                callback_data="edit_resident_list"
+            )
+        )
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+    else:
+        await callback.message.edit_text(message)
+
+    await state.clear()
 
 
 @admin_resident_router.message()
 async def update_resident_field(message: Message, state: FSMContext):
     data = await state.get_data()
-    field = data.get("edit_field")
+    field_code = data.get("edit_field")
     resident_id = data.get("resident_id")
-    
-    if not field or not resident_id:
+
+    if not field_code or not resident_id:
         await message.answer("❌ Ошибка: не найдены данные для обновления")
         await state.clear()
         return
 
+    # Получаем русское название для сообщений об ошибках
+    field_name = FIELD_TRANSLATIONS.get(field_code, field_code)
+
     # Обработка числовых полей
-    if field in ["floor", "office"]:
+    if field_code in ["floor", "office"]:
         try:
             value = int(message.text)
         except ValueError:
-            await message.answer(f"❌ Некорректное значение для {field}! Введите число.")
+            await message.answer(f"❌ Некорректное значение для {field_name}! Введите число.")
             return
     else:
         value = message.text
@@ -774,7 +972,7 @@ async def update_resident_field(message: Message, state: FSMContext):
     # Вызов API функции
     success, result_message = await update_resident_field_api(
         resident_id=resident_id,
-        field=field,
+        field=field_code,  # Используем код поля для API
         value=value,
         headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
     )
@@ -784,6 +982,103 @@ async def update_resident_field(message: Message, state: FSMContext):
 
     if success:
         await edit_resident_list(message)
+
+
+# Обработчик подтверждения для полей
+@admin_resident_router.callback_query(F.data.startswith("confirm_field_update_"))
+async def confirm_field_update(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    resident_id = data['resident_id']
+    field_code = data['field_code']
+    new_value = data['new_value']
+
+    # Обработка числовых полей
+    if field_code in ["floor", "office"]:
+        try:
+            new_value = int(new_value)
+        except ValueError:
+            await callback.message.edit_text(
+                f"❌ Некорректное значение для {data['field_name']}! Введите число."
+            )
+            await state.clear()
+            return
+
+    # Выполняем обновление
+    success, result_message, field_name_ru = await update_resident_field_api(
+        resident_id=resident_id,
+        field=field_code,
+        value=new_value,
+        headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+    )
+
+    if success:
+        # Показываем результат с деталями
+        await callback.message.edit_text(
+            f"✅ <b>{field_name_ru} успешно обновлено!</b>\n\n"
+            f"🏢 <b>Резидент:</b> {data['resident_name']}\n"
+            f"📝 <b>Поле:</b> {field_name_ru}\n"
+            f"📄 <b>Было:</b> {data['old_value']}\n"
+            f"🆕 <b>Стало:</b> {data['new_value']}\n\n"
+            f"Вы можете продолжить редактирование или вернуться назад."
+        )
+
+        # Добавляем кнопки для продолжения
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(
+                text="✏️ Продолжить редактирование",
+                callback_data=f"back_to_edit_{resident_id}"
+            ),
+            InlineKeyboardButton(
+                text="◀️ Назад к списку",
+                callback_data="edit_resident_list"
+            )
+        )
+        await callback.message.edit_reply_markup(reply_markup=builder.as_markup())
+    else:
+        await callback.message.edit_text(result_message)
+
+    await state.clear()
+
+
+# Для кнопки "Назад" из подтверждения
+@admin_resident_router.callback_query(F.data.startswith("back_to_edit_"))
+async def back_to_edit_resident(callback: CallbackQuery, state: FSMContext):
+    resident_id = callback.data.split("_")[-1]
+    await state.update_data(resident_id=resident_id)
+
+    builder = InlineKeyboardBuilder()
+    fields = [
+        ("Название", "name"),
+        ("Категория", "category"),
+        ("Адрес", "address"),
+        ("Строение", "building"),
+        ("Вход", "entrance"),
+        ("Этаж", "floor"),
+        ("Офис", "office")
+    ]
+
+    for field in fields:
+        builder.row(InlineKeyboardButton(
+            text=f"✏️ {field[0]}",
+            callback_data=f"edit_field_{field[1]}"
+        ))
+
+    builder.row(InlineKeyboardButton(
+        text="◀️ Назад",
+        callback_data="edit_resident_list"
+    ))
+
+    await callback.message.edit_text(
+        "Выберите поле для редактирования:",
+        reply_markup=builder.as_markup()
+    )
+
+
+# =================================================================================================
+# Удаление резидента
+# =================================================================================================
+
 
 # Удаление резидента - список
 @admin_resident_router.callback_query(F.data == "delete_resident_list")

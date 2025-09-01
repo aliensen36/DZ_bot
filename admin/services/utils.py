@@ -354,7 +354,7 @@ async def update_resident_field_api(
         field: str,
         value: str | int,
         headers: dict
-) -> tuple[bool, str]:
+) -> tuple[bool, str, str]:
     """
     Обновляет поле резидента через API
 
@@ -365,8 +365,19 @@ async def update_resident_field_api(
         headers: Заголовки запроса
 
     Returns:
-        tuple[bool, str]: (успех, сообщение)
+        tuple[bool, str, str]: (успех, сообщение, русское название поля)
     """
+    FIELD_TRANSLATIONS = {
+        "name": "Название",
+        "category": "Категория",
+        "address": "Адрес",
+        "building": "Строение",
+        "entrance": "Вход",
+        "floor": "Этаж",
+        "office": "Офис"
+    }
+
+    field_name_ru = FIELD_TRANSLATIONS.get(field, field)
     update_data = {field: value}
 
     async with aiohttp.ClientSession() as session:
@@ -377,11 +388,11 @@ async def update_resident_field_api(
                     headers=headers
             ) as response:
                 if response.status == 200:
-                    return True, f"✅ Поле {field} успешно обновлено!"
+                    return True, f"✅ {field_name_ru} успешно обновлено!", field_name_ru
                 error_text = await response.text()
-                return False, f"❌ Ошибка обновления: {error_text}"
+                return False, f"❌ Ошибка обновления: {error_text}", field_name_ru
         except Exception as e:
-            return False, f"❌ Ошибка соединения: {str(e)}"
+            return False, f"❌ Ошибка соединения: {str(e)}", field_name_ru
 
 
 async def fetch_residents_for_deletion() -> tuple[list[dict] | None, str | None]:
@@ -429,3 +440,33 @@ async def delete_resident_api(resident_id: str) -> tuple[bool, str]:
             return False, f"❌ Ошибка соединения: {str(e)}"
 
 
+# Для получения данных резидента
+async def fetch_resident_data(resident_id: int) -> tuple[Optional[dict], Optional[str]]:
+    """Получает данные конкретного резидента по ID"""
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                f"{url_resident}{resident_id}/",
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 200:
+                    return await response.json(), None
+                error_text = await response.text()
+                return None, f"❌ Ошибка загрузки данных резидента: {error_text}"
+        except Exception as e:
+            return None, f"❌ Ошибка соединения: {str(e)}"
+
+async def fetch_category_name(category_id: int) -> str:
+    """Получает название категории по ID"""
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(
+                f"{url_category}{category_id}/",
+                headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+            ) as response:
+                if response.status == 200:
+                    category_data = await response.json()
+                    return category_data.get('name', 'Неизвестная категория')
+                return 'Неизвестная категория'
+        except Exception:
+            return 'Неизвестная категория'
