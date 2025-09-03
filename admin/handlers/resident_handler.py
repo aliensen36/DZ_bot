@@ -782,26 +782,45 @@ async def show_category_selection(callback: CallbackQuery, state: FSMContext, re
 
         builder = InlineKeyboardBuilder()
 
+        # Собираем все ID подкатегорий
+        subcategory_ids = set()
+
+        def collect_child_ids(cat):
+            for child in cat.get('children', []):
+                subcategory_ids.add(child['id'])
+                collect_child_ids(child)
+
+        for cat in categories:
+            collect_child_ids(cat)
+
         def build_category_buttons(categories_list, level=0):
             for category in categories_list:
+                # Пропускаем подкатегории в основном списке (они будут показаны как дочерние)
+                if level == 0 and category['id'] in subcategory_ids:
+                    continue
+
                 indent = "    " * level
-                # Добавляем отметку для текущей категории
-                is_current = category['id'] == current_category_id
-                current_marker = " ✅" if is_current else ""
+                # Добавляем префикс для подкатегорий
+                prefix = "- подкатегория: " if level > 0 else ""
 
                 builder.add(InlineKeyboardButton(
-                    text=f"{indent}📌 {category['name']}{current_marker}",
+                    text=f"{indent}{prefix}{category['name']}",
                     callback_data=f"update_category_{category['id']}"
                 ))
+
+                # Рекурсивно добавляем дочерние категории
                 if category.get('children'):
                     build_category_buttons(category['children'], level + 1)
 
         build_category_buttons(categories)
 
-        builder.row(InlineKeyboardButton(
+        builder.add(InlineKeyboardButton(
             text="◀️ Отмена",
             callback_data=f"back_to_edit_{resident_id}"
         ))
+
+        # Устанавливаем по одной кнопке в ряду
+        builder.adjust(1)
 
         await callback.message.edit_text(
             f"📋 <b>Выбор новой категории</b>\n\n"

@@ -154,7 +154,7 @@ async def fetch_categories_with_keyboard(tree: bool = True, cancel_callback: str
 
                         # Добавляем кнопку категории в отдельный ряд
                         btn_text = "    " * level + ("- подкатегория:  " if level > 0 else "") + cat['name']
-                        builder.row(InlineKeyboardButton(
+                        builder.add(InlineKeyboardButton(
                             text=btn_text,
                             callback_data=f"select_category_{cat['id']}"
                         ))
@@ -166,10 +166,13 @@ async def fetch_categories_with_keyboard(tree: bool = True, cancel_callback: str
                 add_category_buttons(categories)
 
                 # Добавляем кнопку отмены в отдельный ряд
-                builder.row(InlineKeyboardButton(
+                builder.add(InlineKeyboardButton(
                     text="◀️ Отмена",
                     callback_data=cancel_callback
                 ))
+
+                # Устанавливаем по одной кнопке в ряду
+                builder.adjust(1)
 
                 return categories, builder.as_markup()
 
