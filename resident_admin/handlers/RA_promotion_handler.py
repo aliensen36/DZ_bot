@@ -440,7 +440,7 @@ async def process_promotional_code_and_create(message: Message, state: FSMContex
             f"{promotion_data['description']}\n"
             f"{format_datetime(promotion_data.get('start_date'))} - {format_datetime(promotion_data.get('end_date'))}\n"
             f"{promotion_data['discount_percent']}{'%'}\n"
-            f"{promotion_data['promotional_code']}"
+            f"{promotion_data['promotional_code']}\n"
             f"Ожидайте подтверждения администратора."
         )
 

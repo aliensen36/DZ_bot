@@ -58,10 +58,10 @@ def format_promotion_text(promotion: dict) -> str:
     start_date = datetime.fromisoformat(promotion['start_date'].replace("Z", "+00:00")).strftime("%d.%m.%Y %H:%M")
     end_date = datetime.fromisoformat(promotion['end_date'].replace("Z", "+00:00")).strftime("%d.%m.%Y %H:%M")
     return (
-        f"<b>Акция подтверждена: {promotion['title']}</b>\n\n"
-        f"Период: {start_date} - {end_date}\n\n"
-        f"{promotion['discount_or_bonus'].capitalize()}: {promotion['discount_or_bonus_value']}{'%' if promotion['discount_or_bonus'] == 'скидка' else ''}\n\n"
-        f"{promotion['description']}\n\n"
+        f"<b>Акция подтверждена: {promotion['title']}</b>\n"
+        f"Период: {start_date} - {end_date}\n"
+        f"{promotion['discount_or_bonus'].capitalize()}: {promotion['discount_or_bonus_value']}{'%' if promotion['discount_or_bonus'] == 'скидка' else ''}\n"
+        f"{promotion['description']}\n"
         f"Ссылка: {promotion['url']}\n"
         f"Статус: Подтверждена"
     )
