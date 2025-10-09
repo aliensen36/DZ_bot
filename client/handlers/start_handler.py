@@ -249,7 +249,7 @@ async def send_webapp_button(message: Message):
         inline_keyboard=[
             [InlineKeyboardButton(
                 text="Перейти в мини-приложение",
-                web_app=WebAppInfo(url="https://design-zavod.tech/")
+                web_app=WebAppInfo(url="https://frontend-tau-fawn-68.vercel.app")
             )]
         ]
     )
