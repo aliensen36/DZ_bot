@@ -248,12 +248,12 @@ async def show_statistics(message: Message):
         # Формируем список пользователей
         users_list = "📋 <b>Список пользователей:</b>\n\n"
         for i, user in enumerate(users, 1):
-            tg_id = user.get('tg_id', 'N/A')
-            username = f"@{user.get('username', 'N/A')}" if user.get('username') else "N/A"
-            first_name = user.get('first_name', 'N/A')
-            last_name = user.get('last_name', 'N/A')
+            tg_id = user.get('tg_id')
+            username = user.get('username')
+            first_name = user.get('first_name')
+            last_name = user.get('last_name')
 
-            users_list += f"{i}. ID: <code>{tg_id}</code> | Юзернейм: {username} | Имя: {first_name} | Фамилия: {last_name}\n"
+            users_list += f"{i}. ID: <code>{tg_id}</code> {username} {first_name} {last_name}\n"
 
         builder = InlineKeyboardBuilder()
         builder.add(InlineKeyboardButton(
