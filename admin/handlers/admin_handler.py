@@ -178,6 +178,7 @@ async def admin_panel(message: Message, bot: Bot):
         reply_markup=admin_keyboard()
     )
 
+
 @admin_router.message(F.text == "📊 Статистика")
 async def show_statistics(message: Message):
     """Отображает статистику пользователей и предлагает выгрузку в Excel.
@@ -213,8 +214,8 @@ async def show_statistics(message: Message):
         async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=10)) as session:
             try:
                 async with session.get(
-                    url_users,
-                    headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
+                        url_users,
+                        headers={"X-Bot-Api-Key": config_settings.BOT_API_KEY.get_secret_value()}
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
@@ -244,6 +245,16 @@ async def show_statistics(message: Message):
         total_users = len(users)
         active_users = sum(1 for user in users if user.get('is_active', False))
 
+        # Формируем список пользователей
+        users_list = "📋 <b>Список пользователей:</b>\n\n"
+        for i, user in enumerate(users, 1):
+            tg_id = user.get('tg_id', 'N/A')
+            username = f"@{user.get('username', 'N/A')}" if user.get('username') else "N/A"
+            first_name = user.get('first_name', 'N/A')
+            last_name = user.get('last_name', 'N/A')
+
+            users_list += f"{i}. ID: <code>{tg_id}</code> | Юзернейм: {username} | Имя: {first_name} | Фамилия: {last_name}\n"
+
         builder = InlineKeyboardBuilder()
         builder.add(InlineKeyboardButton(
             text="📥 Выгрузить в Excel",
@@ -252,14 +263,15 @@ async def show_statistics(message: Message):
 
         await message.answer(
             f"📊 <b>Статистика бота</b>\n\n"
-            f"👥 Всего пользователей: <code>{total_users}</code>\n"
-            f"🟢 Активных: <code>{active_users}</code>",
+            f"👥 Всего пользователей: <code>{total_users}</code>\n\n"
+            f"{users_list}",
             reply_markup=builder.as_markup()
         )
 
     except Exception as e:
         logger.error(f"Unexpected error in show_statistics: {e}", exc_info=True)
         await message.answer("⚠️ Непредвиденная ошибка при получении статистики")
+
 
 @admin_router.callback_query(F.data == "export_users_excel")
 async def export_users_excel(callback: CallbackQuery):
