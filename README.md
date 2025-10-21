@@ -1,4 +1,4 @@
-# Телеграм-бот Дизайн завода
+# Телеграм-бот Арт-пространства
 
 
 [<img src="https://telegram.org/img/t_logo.svg" width="16"/> Перейти в бот](https://t.me/DZavodBot)
