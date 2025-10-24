@@ -19,10 +19,34 @@ logger = logging.getLogger(__name__)
 start_router = Router()
 
 
-# Состояния конечного автомата:
-# choosing — пользователь выбирает интересы после регистрации.
+# Пользователь выбирает интересы
 class Form(StatesGroup):
     choosing = State()
+
+
+async def send_new_user_notification(bot, user_data: dict, referral_code: str = None):
+    """Отправляет уведомление в админ-группу о новом пользователе"""
+    try:
+        # Форматируем информацию о пользователе
+        user_info = (
+            "🎉 *Новый пользователь в боте!*\n\n"
+            f"*ID:* `{user_data['tg_id']}`\n"
+            f"*Имя:* {user_data['first_name'] or 'Не указано'}\n"
+            f"*Фамилия:* {user_data['last_name'] or 'Не указана'}\n"
+            f"*Username:* @{user_data['username'] or 'Не указан'}\n"
+        )
+
+        user_info += f"*Бот:* {'Да' if user_data['is_bot'] else 'Нет'}"
+
+        # Отправляем сообщение в админ-группу
+        await bot.send_message(
+            chat_id=config_settings.ADMIN_CHAT_ID,
+            text=user_info
+        )
+        logger.info(f"Уведомление о новом пользователе отправлено в админ-группу: {user_data['tg_id']}")
+
+    except Exception as e:
+        logger.error(f"Ошибка при отправке уведомления в админ-группу: {e}")
 
 
 @start_router.message(CommandStart())
@@ -66,6 +90,8 @@ async def cmd_start(message: AiogramMessage, state: FSMContext):
 
                         # Определяем текст приветствия
                         if resp.status == 201:
+                            # Отправляем уведомление в админ-группу о новом пользователе
+                            await send_new_user_notification(message.bot, user_data, referral_code)
                             # Приветственный текст
                             greeting_text = (
                                 "<b>Здравствуйте!</b>\n\n"
@@ -78,7 +104,6 @@ async def cmd_start(message: AiogramMessage, state: FSMContext):
 
                             await message.answer(
                                 greeting_text,
-                                parse_mode="HTML",
                                 reply_markup = await build_interests_keyboard([])
                             )
 
@@ -88,7 +113,6 @@ async def cmd_start(message: AiogramMessage, state: FSMContext):
                             await message.answer(
                                 f"Здравствуйте, <b>{greeting_name}</b>!\n\n"
                                 f"{greeting_text}",
-                                parse_mode="HTML",
                                 reply_markup=main_kb
                             )
 
