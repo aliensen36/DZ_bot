@@ -29,14 +29,14 @@ async def send_new_user_notification(bot, user_data: dict, referral_code: str = 
     try:
         # Форматируем информацию о пользователе
         user_info = (
-            "🎉 *Новый пользователь в боте!*\n\n"
-            f"*ID:* `{user_data['tg_id']}`\n"
-            f"*Имя:* {user_data['first_name'] or 'Не указано'}\n"
-            f"*Фамилия:* {user_data['last_name'] or 'Не указана'}\n"
-            f"*Username:* @{user_data['username'] or 'Не указан'}\n"
+            "🎉 <b>Новый пользователь в боте!</b>\n\n"
+            f"<b>ID:</b> `{user_data['tg_id']}`\n"
+            f"<b>Имя:</b> {user_data['first_name'] or '-'}\n"
+            f"<b>Фамилия:</b> {user_data['last_name'] or '-'}\n"
+            f"<b>Username:</b> @{user_data['username'] or '-'}\n"
         )
 
-        user_info += f"*Бот:* {'Да' if user_data['is_bot'] else 'Нет'}"
+        user_info += f"<b>Бот:</b> {'Да' if user_data['is_bot'] else 'Нет'}"
 
         # Отправляем сообщение в админ-группу
         await bot.send_message(
