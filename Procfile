@@ -1,3 +1,3 @@
-# worker: python run.py
-web: python run.py
-# web: python -m http.server $PORT
+# Procfile
+web: gunicorn web_server:app --bind 0.0.0.0:$PORT
+worker: python run.py
