@@ -1,0 +1,22 @@
+# deploy/systemd/gunicorn_bot.service
+
+[Unit]
+Description=Gunicorn for dz_bot Telegram bot
+After=network.target
+
+[Service]
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/dz_bot
+EnvironmentFile=/var/www/dz_bot/.env
+
+# Указываем uvicorn worker, чтобы асинхронный код aiogram работал
+ExecStart=/var/www/dz_bot/venv/bin/gunicorn run:bot \
+    -k uvicorn.workers.UvicornWorker \
+    --bind 127.0.0.1:8001 \
+    --workers 1
+
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
