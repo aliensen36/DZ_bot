@@ -1,0 +1,24 @@
+# dz_bot/deploy/systemd/dz_bot.service
+
+[Unit]
+Description=DZ Telegram Bot (aiogram polling)
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/dz_bot
+EnvironmentFile=/var/www/dz_bot/.env
+
+ExecStart=/var/www/dz_bot/venv/bin/python run.py
+
+Restart=always
+RestartSec=3
+
+# Безопасность и стабильность
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
